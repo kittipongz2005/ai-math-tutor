@@ -20,11 +20,9 @@ st.title("🚀 ติวเตอร์คณิตศาสตร์ AI (Cloud 
 # -----------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "processing" not in st.session_state:
-    st.session_state.processing = False
 
 def fix_latex(text):
-    t = text.replace(r'\[', '$$').replace(r'\]', '$$').replace(r'\(', '$').replace(r'\)', '$')
+    t = str(text).replace(r'\[', '$$').replace(r'\]', '$$').replace(r'\(', '$').replace(r'\)', '$')
     translate_dict = {
         'Wykładnik': 'เลขชี้กำลัง', 'wykładnik': 'เลขชี้กำลัง',
         'tích phân': 'อินทิเกรต', 'Тогда': 'ดังนั้น', 'тогда': 'ดังนั้น',
@@ -37,10 +35,9 @@ def fix_latex(text):
         t = t.replace(foreign, th)
     return t
 
-# ฟังก์ชันแปลงรูปภาพเป็น Base64 เพื่อส่งขึ้น Cloud
 def encode_image(img):
     buffered = io.BytesIO()
-    img = img.convert('RGB') # ป้องกัน error จากไฟล์ PNG โปร่งใส
+    img = img.convert('RGB')
     img.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
@@ -50,26 +47,25 @@ def encode_image(img):
 with st.sidebar:
     st.header("☁️ ตั้งค่าระบบ Cloud")
     
-    # ช่องใส่ API Key 
     API_KEY = st.text_input("🔑 ใส่ Groq API Key:", type="password", help="รับฟรีที่ console.groq.com")
     
-    # เลือกโมเดล
+    # สลับเอาโมเดลยอดฮิตขึ้นก่อน
     MODEL_NAME = st.selectbox(
         "ชื่อโมเดล (Groq):", 
         ["llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b", "llama-3.2-90b-vision-preview"]
     )
-    st.caption("💡 แนะนำ: ถ้าแนบรูปภาพด้วย ให้เลือกโมเดลลงท้ายด้วย vision-preview")
+    st.caption("💡 จำเป็น: ถ้าคุณ 'แนบรูปภาพ' ต้องใช้โมเดล vision-preview เท่านั้น!")
 
     response_style = st.selectbox(
         "รูปแบบการตอบของ AI:",
         ["📝 สอนและอธิบายละเอียด", "⚡️ เฉลยอย่างเดียว (กระชับ)"],
-        disabled=st.session_state.processing
+        key="style_memory"
     )
 
     st.divider()
 
     st.header("📤 อัปโหลดเอกสาร/รูปภาพ")
-    uploaded_file = st.file_uploader("แนบไฟล์ PDF, TXT หรือรูปโจทย์", type=["pdf", "txt", "png", "jpg", "jpeg"], disabled=st.session_state.processing)
+    uploaded_file = st.file_uploader("แนบไฟล์ PDF, TXT หรือรูปโจทย์", type=["pdf", "txt", "png", "jpg", "jpeg"])
 
     file_content = ""
     uploaded_img = None
@@ -92,12 +88,12 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button("🗑️ ล้างแชท", use_container_width=True, disabled=st.session_state.processing):
+    if st.button("🗑️ ล้างแชท", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
 # -----------------------------------------
-# 4. แสดงประวัติแชท
+# 4. แสดงประวัติแชทบนหน้าจอ
 # -----------------------------------------
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -105,77 +101,95 @@ for message in st.session_state.messages:
             st.image(message["image_show"], width=300)
 
         content = message["content"]
-        # แสดงผลถ้ามี <think>
         if message["role"] == "assistant" and "</think>" in str(content):
             parts = str(content).split("</think>")
             with st.expander("💡 ดูเบื้องหลังการคิด"):
                 st.write(parts[0].replace("<think>", "").strip())
             st.markdown(fix_latex(parts[1].strip()))
         else:
-            if isinstance(content, list): # กรณีส่งเป็นลิสต์ข้อความ+รูป
-                st.markdown(fix_latex(content[0]["text"]))
-            else:
-                display_text = str(content).split("[ข้อมูลอ้างอิงจากไฟล์]")[0]
-                st.markdown(fix_latex(display_text))
+            st.markdown(fix_latex(content))
 
         if "plot" in message:
             st.pyplot(message["plot"])
 
 # -----------------------------------------
-# 5. รับข้อความ & จัดการคิว
+# 5. รับข้อความ & จัดการข้อมูลให้ตรงตามกฎแต่ละโมเดล
 # -----------------------------------------
-prompt = st.chat_input("พิมพ์โจทย์ หรือสั่งให้ AI วิเคราะห์ไฟล์...", disabled=st.session_state.processing)
-
-if prompt:
-    if not API_KEY:
-        st.error("⚠️ กรุณาใส่ Groq API Key ที่แถบด้านซ้ายก่อนครับ! (ไปเอาได้ฟรีที่ console.groq.com)")
+if prompt := st.chat_input("พิมพ์โจทย์ หรือสั่งให้ AI วิเคราะห์..."):
+    
+    if not API_KEY.strip():
+        st.error("⚠️ กรุณาใส่ Groq API Key ที่แถบด้านซ้ายก่อนครับ!")
         st.stop()
 
-    # สร้าง Message แบบ Cloud (รองรับ Vision)
-    if base64_image and "vision" in MODEL_NAME.lower():
-        user_content = [
-            {"type": "text", "text": prompt + ("\n[ข้อมูลอ้างอิงจากไฟล์]:\n" + file_content if file_content else "")},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-        ]
-        user_msg = {"role": "user", "content": user_content, "image_show": uploaded_img}
-    else:
-        text_payload = prompt
-        if file_content: text_payload += f"\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n{file_content}"
-        user_msg = {"role": "user", "content": text_payload}
-        if uploaded_img: user_msg["image_show"] = uploaded_img
-
+    # บันทึกโจทย์ที่ผู้ใช้พิมพ์โชว์บนหน้าจอ
+    user_msg = {"role": "user", "content": prompt}
+    if uploaded_img:
+        user_msg["image_show"] = uploaded_img
+    
     st.session_state.messages.append(user_msg)
-    st.session_state.processing = True
-    st.rerun()
+    
+    with st.chat_message("user"):
+        if uploaded_img:
+            st.image(uploaded_img, width=300)
+        st.markdown(prompt)
 
-# -----------------------------------------
-# 6. ระบบ AI ประมวลผลบน Cloud
-# -----------------------------------------
-if st.session_state.processing:
+    # เริ่มเรียกใช้งาน AI
     with st.chat_message("assistant"):
         try:
-            client = Groq(api_key=API_KEY)
+            client = Groq(api_key=API_KEY.strip())
+            
+            # --- ระบบสับราง (ดักจับประเภทโมเดล) ---
+            is_deepseek = "deepseek" in MODEL_NAME.lower()
+            is_vision = "vision" in MODEL_NAME.lower()
             
             instr = "อธิบายละเอียดใจดีและแสดงวิธีทำทีละขั้น" if "อธิบายละเอียด" in response_style else "เฉลยอย่างกระชับ"
-            sys_prompt = f"""คุณคือติวเตอร์คณิตศาสตร์อัจฉริยะ ({instr}) 
+            sys_prompt = f"""คุณคือติวเตอร์คณิตศาสตร์ ({instr}) 
             กฎเหล็ก:
-            1. ตอบเฉพาะ 'สิ่งที่ผู้ใช้ถาม' เท่านั้น ห้ามทำข้ออื่นเด็ดขาด
+            1. ตอบเฉพาะสิ่งที่ผู้ใช้ถาม ห้ามทำข้ออื่นเด็ดขาด
             2. ใช้ภาษาไทย 100% (ศัพท์เทคนิคใช้ภาษาอังกฤษได้)
-            3. ใช้ LaTeX ($ และ $$) เสมอ โดยครอบสมการทุกครั้ง
+            3. ใช้ LaTeX ($ และ $$) เสมอ
             4. หากต้องวาดกราฟ ให้เขียนโค้ด Python (matplotlib) ในบล็อก ```python"""
 
-            # เตรียมข้อความส่งขึ้น Cloud
-            messages_for_ai = [{'role': 'system', 'content': sys_prompt}]
-            for m in st.session_state.messages:
-                messages_for_ai.append({'role': m['role'], 'content': m['content']})
+            messages_for_ai = []
+            
+            # กฎข้อ 1: ถ้าไม่ใช่ DeepSeek ถึงจะอนุญาตให้ส่ง System Prompt ได้
+            if not is_deepseek:
+                messages_for_ai.append({'role': 'system', 'content': sys_prompt})
+
+            # นำประวัติแชทมาเรียบเรียงใหม่
+            for i, m in enumerate(st.session_state.messages):
+                role = m['role']
+                content_text = str(m['content'])
+                
+                # กฎข้อ 2: ถ้าเป็น DeepSeek ให้แอบยัดคำสั่ง System ไว้ในข้อความแรกของผู้ใช้แทน
+                if is_deepseek and i == 0 and role == 'user':
+                    content_text = f"[คำสั่งระบบ: {sys_prompt}]\n\n" + content_text
+
+                # กฎข้อ 3: จัดการไฟล์และรูปภาพ เฉพาะกับคำถาม "ข้อล่าสุด" เท่านั้น
+                if i == len(st.session_state.messages) - 1 and role == 'user':
+                    if file_content:
+                        content_text += f"\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n{file_content}"
+                    
+                    if base64_image:
+                        if is_vision:
+                            # กฎข้อ 4: รูปแบบ JSON พิเศษสำหรับโมเดล Vision โดยเฉพาะ
+                            payload = [
+                                {"type": "text", "text": content_text},
+                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                            ]
+                            messages_for_ai.append({'role': role, 'content': payload})
+                            continue # ข้ามการ append แบบ text ปกติไปเลย
+                        else:
+                            content_text += "\n\n(ผู้ใช้แนบรูปมาด้วย แต่โมเดลนี้ไม่รองรับการดูรูปภาพ ให้คุณตอบจากข้อความโจทย์เป็นหลัก)"
+
+                messages_for_ai.append({'role': role, 'content': content_text})
 
             full_response = ""
             is_thinking = False
             answer_placeholder = st.empty()
-
             start_time = time.time()
 
-            # เรียก API
+            # ส่งยิงขึ้น Cloud
             stream = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=messages_for_ai,
@@ -203,7 +217,7 @@ if st.session_state.processing:
             final_answer = full_response.split("</think>")[-1] if "</think>" in full_response else full_response
             answer_placeholder.markdown(fix_latex(final_answer).strip())
 
-            # วาดกราฟ
+            # วาดกราฟอัตโนมัติ
             plot_fig = None
             code_match = re.search(r'```python\n(.*?)```', full_response, re.DOTALL)
             if code_match:
@@ -222,7 +236,5 @@ if st.session_state.processing:
             st.session_state.messages.append(res_msg)
 
         except Exception as e:
-            st.error(f"เกิดข้อผิดพลาดจาก Cloud: {e} \n(ถ้าส่งรูปภาพ อย่าลืมเลือกโมเดลที่ลงท้ายด้วย vision)")
-        finally:
-            st.session_state.processing = False
-            st.rerun()
+            # ดัก Error มาโชว์ให้เห็นชัดๆ เลยว่าพังเพราะอะไร
+            st.error(f"🚨 Cloud Error: {e}")
