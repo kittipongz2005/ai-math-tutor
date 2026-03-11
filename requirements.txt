@@ -1,0 +1,6 @@
+streamlit
+PyPDF2
+Pillow
+matplotlib
+numpy
+groq
