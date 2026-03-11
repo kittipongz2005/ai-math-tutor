@@ -49,12 +49,16 @@ with st.sidebar:
     
     API_KEY = st.text_input("🔑 ใส่ Groq API Key:", type="password", help="รับฟรีที่ console.groq.com")
     
-    # สลับเอาโมเดลยอดฮิตขึ้นก่อน
+    # อัปเดตรายชื่อโมเดลที่ Groq รองรับ ณ ปัจจุบัน
     MODEL_NAME = st.selectbox(
         "ชื่อโมเดล (Groq):", 
-        ["llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b", "llama-3.2-90b-vision-preview"]
+        [
+            "llama-3.3-70b-versatile",    # ตัวหลัก ฉลาดและเร็วมาก
+            "llama-3.1-8b-instant",       # ตัวรอง เร็วปานสายฟ้า
+            "mixtral-8x7b-32768"          # ตัวเลือกเสริม เก่งคณิตศาสตร์
+        ]
     )
-    st.caption("💡 จำเป็น: ถ้าคุณ 'แนบรูปภาพ' ต้องใช้โมเดล vision-preview เท่านั้น!")
+    st.caption("💡 แนะนำให้ใช้ llama-3.3-70b-versatile เป็นหลักครับ")
 
     response_style = st.selectbox(
         "รูปแบบการตอบของ AI:",
