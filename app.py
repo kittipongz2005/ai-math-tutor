@@ -99,6 +99,7 @@ for key, val in {
     "worksheet_pdf_bytes": b"",
     "worksheet_pdf_name": "",
     "worksheet_pdf_ready": False,
+    "manual_weakness_text": "",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -214,6 +215,28 @@ def update_weakness(text: str):
     for topic in extract_topics(text):
         st.session_state.weakness_counts[topic] = \
             st.session_state.weakness_counts.get(topic, 0) + 1
+
+
+def parse_manual_weakness_topics(text: str) -> list[str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    topics = [p.strip() for p in re.split(r"[,\n;/|]+", raw) if p.strip()]
+    unique_topics = []
+    seen = set()
+    for topic in topics:
+        key = topic.lower()
+        if key not in seen:
+            seen.add(key)
+            unique_topics.append(topic)
+    return unique_topics[:10]
+
+
+def build_effective_weakness_counts(auto_counts: dict, manual_text: str) -> dict:
+    merged = copy.deepcopy(auto_counts) if isinstance(auto_counts, dict) else {}
+    for topic in parse_manual_weakness_topics(manual_text):
+        merged[topic] = merged.get(topic, 0) + 3
+    return merged
 
 
 def clean_snippet(text: str, max_len=200) -> str:
@@ -757,6 +780,7 @@ def reset_current_chat():
     st.session_state.worksheet_pdf_bytes = b""
     st.session_state.worksheet_pdf_name = ""
     st.session_state.worksheet_pdf_ready = False
+    st.session_state.manual_weakness_text = ""
     save_store()
 
 
@@ -1191,8 +1215,23 @@ with st.sidebar:
                     st.rerun()
 
         st.markdown("### 🖨️ Smart Worksheet Generator")
-        if not st.session_state.weakness_counts:
-            st.caption("ยังไม่มีข้อมูลจุดอ่อนในเซสชันนี้ ระบบจะแสดงปุ่มไว้สำหรับเดโม แต่ต้องถามโจทย์อย่างน้อย 1 ครั้งก่อนสร้างใบงาน")
+        st.text_area(
+            "พิมพ์หัวข้อที่อ่อนเอง (คั่นด้วย , หรือขึ้นบรรทัดใหม่)",
+            key="manual_weakness_text",
+            height=76,
+            placeholder="เช่น แคลคูลัส, ตรีโกณมิติ, เมทริกซ์",
+        )
+
+        effective_weakness_counts = build_effective_weakness_counts(
+            st.session_state.weakness_counts,
+            st.session_state.manual_weakness_text,
+        )
+
+        if not effective_weakness_counts:
+            st.caption("ยังไม่มีข้อมูลจุดอ่อน ให้พิมพ์หัวข้อที่อ่อนเองด้านบน หรือถามโจทย์ก่อนอย่างน้อย 1 ครั้ง")
+        else:
+            top_preview = sorted(effective_weakness_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+            st.caption("หัวข้อที่จะใช้สร้างใบงาน: " + ", ".join([f"{t}" for t, _ in top_preview]))
 
         worksheet_q_count = st.slider(
             "จำนวนข้อสำหรับใบงานทบทวน",
@@ -1211,7 +1250,7 @@ with st.sidebar:
                     worksheet_payload, ws_err = build_weakness_worksheet_payload(
                         api_key=API_KEY.strip(),
                         model_name=MODEL_NAME,
-                        weakness_counts=st.session_state.weakness_counts,
+                        weakness_counts=effective_weakness_counts,
                         learner_level=learner_level,
                         language_pref=language_pref,
                         question_count=worksheet_q_count,
@@ -1224,7 +1263,7 @@ with st.sidebar:
                     else:
                         pdf_bytes, pdf_err = build_weakness_worksheet_pdf_bytes(
                             worksheet=worksheet_payload,
-                            weakness_counts=st.session_state.weakness_counts,
+                            weakness_counts=effective_weakness_counts,
                         )
                         if pdf_err:
                             st.error(pdf_err)
