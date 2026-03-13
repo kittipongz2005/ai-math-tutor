@@ -20,8 +20,8 @@ from ui_assets import apply_ui_decorations
 from html_export import build_chat_export_html
 from worksheet_tools import (
     build_effective_weakness_counts,
+    build_weakness_worksheet_html,
     build_weakness_worksheet_payload,
-    build_weakness_worksheet_pdf_bytes,
     resolve_pdf_font_name,
 )
 
@@ -102,9 +102,9 @@ for key, val in {
     "edit_message_index": -1,
     "edit_message_text": "",
     "enable_python_calc": True,
-    "worksheet_pdf_bytes": b"",
-    "worksheet_pdf_name": "",
-    "worksheet_pdf_ready": False,
+    "worksheet_export_content": "",
+    "worksheet_export_name": "",
+    "worksheet_export_ready": False,
     "manual_weakness_text": "",
 }.items():
     if key not in st.session_state:
@@ -508,9 +508,9 @@ def reset_current_chat():
     st.session_state.socratic_can_continue = False
     st.session_state.current_chat_id = ""
     st.session_state.current_chat_dirty = False
-    st.session_state.worksheet_pdf_bytes = b""
-    st.session_state.worksheet_pdf_name = ""
-    st.session_state.worksheet_pdf_ready = False
+    st.session_state.worksheet_export_content = ""
+    st.session_state.worksheet_export_name = ""
+    st.session_state.worksheet_export_ready = False
     st.session_state.manual_weakness_text = ""
     save_store()
 
@@ -988,35 +988,30 @@ with st.sidebar:
                     )
                     if ws_err:
                         st.error(ws_err)
-                        st.session_state.worksheet_pdf_bytes = b""
-                        st.session_state.worksheet_pdf_name = ""
-                        st.session_state.worksheet_pdf_ready = False
+                        st.session_state.worksheet_export_content = ""
+                        st.session_state.worksheet_export_name = ""
+                        st.session_state.worksheet_export_ready = False
                     else:
-                        pdf_bytes, pdf_err = build_weakness_worksheet_pdf_bytes(
+                        worksheet_html = build_weakness_worksheet_html(
                             worksheet=worksheet_payload,
                             weakness_counts=effective_weakness_counts,
                         )
-                        if pdf_err:
-                            st.error(pdf_err)
-                            st.session_state.worksheet_pdf_bytes = b""
-                            st.session_state.worksheet_pdf_name = ""
-                            st.session_state.worksheet_pdf_ready = False
-                        else:
-                            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            st.session_state.worksheet_pdf_bytes = pdf_bytes
-                            st.session_state.worksheet_pdf_name = f"weakness_worksheet_{stamp}.pdf"
-                            st.session_state.worksheet_pdf_ready = True
-                            st.success("สร้างใบงานสำเร็จ — พร้อมดาวน์โหลด PDF")
+                        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        st.session_state.worksheet_export_content = worksheet_html
+                        st.session_state.worksheet_export_name = f"weakness_worksheet_{stamp}.html"
+                        st.session_state.worksheet_export_ready = True
+                        st.success("สร้างใบงานสำเร็จ — ดาวน์โหลด HTML แล้วเปิดในเบราว์เซอร์เพื่อ Save as PDF")
 
-        if st.session_state.worksheet_pdf_ready and st.session_state.worksheet_pdf_bytes:
+        if st.session_state.worksheet_export_ready and st.session_state.worksheet_export_content:
             st.download_button(
-                "ดาวน์โหลดใบงาน PDF",
-                data=st.session_state.worksheet_pdf_bytes,
-                file_name=st.session_state.worksheet_pdf_name or "weakness_worksheet.pdf",
-                mime="application/pdf",
+                "ดาวน์โหลดใบงาน HTML (Save as PDF)",
+                data=st.session_state.worksheet_export_content,
+                file_name=st.session_state.worksheet_export_name or "weakness_worksheet.html",
+                mime="text/html",
                 use_container_width=True,
-                key="download_weakness_worksheet_pdf",
+                key="download_weakness_worksheet_html",
             )
+            st.caption("วิธีใช้งาน: เปิดไฟล์ HTML ใน Chrome/Edge → กด Ctrl+P → Save as PDF")
 
     if st.button("🗑️ ล้างการสนทนา", use_container_width=True):
         reset_current_chat()

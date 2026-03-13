@@ -1,4 +1,5 @@
 import copy
+import html
 import io
 import importlib
 import json
@@ -288,3 +289,82 @@ def build_weakness_worksheet_pdf_bytes(worksheet: dict, weakness_counts: dict) -
     pdf.save()
     buffer.seek(0)
     return buffer.getvalue(), None
+
+
+def build_weakness_worksheet_html(worksheet: dict, weakness_counts: dict) -> str:
+        title = str(worksheet.get("worksheet_title", "Smart Worksheet Generator")).strip() or "Smart Worksheet Generator"
+        instructions = str(worksheet.get("instructions", "ทำโจทย์ให้ครบทุกข้อ และตรวจคำตอบจากหน้าถัดไป")).strip()
+        questions = worksheet.get("questions", []) if isinstance(worksheet, dict) else []
+
+        tops = sorted(weakness_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        weak_blocks = "".join(
+                f"<li>{html.escape(str(topic))} ({int(count)} ครั้ง)</li>"
+                for topic, count in tops
+        )
+
+        q_blocks = []
+        a_blocks = []
+        for idx, q in enumerate(questions, 1):
+                topic = html.escape(str(q.get("topic", "หัวข้อผสม")))
+                problem = html.escape(str(q.get("problem", "(ไม่มีข้อความโจทย์)")))
+                q_blocks.append(
+                        f"<article class='card'><h3>ข้อ {idx} <span class='topic'>[{topic}]</span></h3><div class='problem math-zone'>{problem}</div></article>"
+                )
+
+                steps = q.get("solution_steps", [])
+                if not isinstance(steps, list):
+                        steps = [str(steps)] if steps else []
+                step_items = "".join(
+                        f"<li class='math-zone'>{html.escape(str(step))}</li>"
+                        for step in steps
+                ) or "<li>(ไม่มีขั้นตอนที่ส่งกลับมา)</li>"
+                final_answer = html.escape(str(q.get("final_answer", "-")))
+                a_blocks.append(
+                        f"<article class='card'><h3>ข้อ {idx} <span class='topic'>[{topic}]</span></h3><ol>{step_items}</ol><p class='final'>คำตอบสุดท้าย: <span class='math-zone'>{final_answer}</span></p></article>"
+                )
+
+        exported_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return f"""<!doctype html>
+<html lang=\"th\">
+<head>
+    <meta charset=\"UTF-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>{html.escape(title)}</title>
+    <link rel=\"preconnect\" href=\"https://cdn.jsdelivr.net\" />
+    <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css\" />
+    <style>
+        body {{ font-family: 'Noto Sans Thai', 'Sarabun', 'Segoe UI', Arial, sans-serif; color:#0f172a; background:#f8fafc; margin:0; }}
+        .wrap {{ max-width: 960px; margin: 0 auto; padding: 24px; }}
+        h1 {{ margin: 0 0 6px; }}
+        .meta {{ color:#475569; margin-bottom:10px; }}
+        .card {{ background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:12px 14px; margin:10px 0; }}
+        .topic {{ color:#334155; font-size:.9rem; }}
+        .problem {{ white-space: pre-wrap; }}
+        .final {{ margin-top: 8px; font-weight: 700; }}
+        .page-break {{ page-break-before: always; break-before: page; margin-top: 20px; }}
+        .katex-display {{ overflow-x:auto; overflow-y:hidden; text-align:left !important; }}
+        @media print {{ body {{ background:#fff; }} .card {{ box-shadow:none; break-inside:avoid; }} }}
+    </style>
+</head>
+<body>
+    <main class=\"wrap\">
+        <h1>{html.escape(title)}</h1>
+        <div class=\"meta\">สร้างเมื่อ: {exported_at}</div>
+        <div class=\"card\"><strong>จุดอ่อนที่ใช้สร้างใบงาน</strong><ul>{weak_blocks or '<li>-</li>'}</ul></div>
+        <div class=\"card\"><strong>คำแนะนำ:</strong> <span class=\"math-zone\">{html.escape(instructions)}</span></div>
+
+        <h2>โจทย์ (หน้าแบบฝึกหัด)</h2>
+        {''.join(q_blocks)}
+
+        <section class=\"page-break\">
+            <h2>เฉลยละเอียด (หน้านี้สำหรับตรวจคำตอบ)</h2>
+            {''.join(a_blocks)}
+        </section>
+    </main>
+
+    <script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js\"></script>
+    <script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js\"
+        onload=\"renderMathInElement(document.body,{{delimiters:[{{left:'$$',right:'$$',display:true}},{{left:'$',right:'$',display:false}}],throwOnError:false}});\"></script>
+</body>
+</html>
+"""
