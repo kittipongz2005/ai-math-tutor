@@ -499,6 +499,8 @@ for key, val in {
     "chat_history": [],
     "quick_mode": "ติวละเอียด",
     "last_quick_mode": "ติวละเอียด",
+    "current_chat_id": "",
+    "current_chat_dirty": False,
     "pending_quick_mode_restore": "",
     "pending_last_mode_restore": "",
     "storage_loaded": False,
@@ -704,6 +706,8 @@ def save_store():
                 "weakness_counts": st.session_state.weakness_counts,
                 "quick_mode": st.session_state.quick_mode,
                 "last_quick_mode": st.session_state.last_quick_mode,
+                "chat_id": st.session_state.current_chat_id,
+                "dirty": st.session_state.current_chat_dirty,
             },
             "updated_at": now_iso(),
             "version": 1,
@@ -736,6 +740,8 @@ def load_store_once():
         weakness = current.get("weakness_counts", {})
         quick_mode = current.get("quick_mode", st.session_state.quick_mode)
         last_mode = current.get("last_quick_mode", quick_mode)
+        chat_id = current.get("chat_id", "")
+        dirty = bool(current.get("dirty", False))
 
         if isinstance(messages, list):
             st.session_state.messages = messages
@@ -745,6 +751,8 @@ def load_store_once():
             st.session_state.quick_mode = quick_mode
         if last_mode in ["ติวละเอียด", "ฝึกทีละขั้น", "เฉลยไว"]:
             st.session_state.last_quick_mode = last_mode
+        st.session_state.current_chat_id = str(chat_id) if chat_id else ""
+        st.session_state.current_chat_dirty = dirty
 
 
 def reset_current_chat():
@@ -753,11 +761,16 @@ def reset_current_chat():
     st.session_state.weakness_counts = {}
     st.session_state.socratic_continue = False
     st.session_state.socratic_can_continue = False
+    st.session_state.current_chat_id = ""
+    st.session_state.current_chat_dirty = False
     save_store()
 
 
 def archive_current_chat(mode_name: str):
     if not st.session_state.messages:
+        return
+
+    if st.session_state.current_chat_id and not st.session_state.current_chat_dirty:
         return
 
     first_user = next(
@@ -766,8 +779,9 @@ def archive_current_chat(mode_name: str):
     )
     title = clean_snippet(first_user, 50) or "แชทคณิตศาสตร์"
 
+    chat_id = st.session_state.current_chat_id or f"chat_{int(time.time() * 1000)}"
     snapshot = {
-        "id": f"chat_{int(time.time() * 1000)}",
+        "id": chat_id,
         "title": title,
         "mode": mode_name,
         "messages": sanitize_messages_for_storage(st.session_state.messages),
@@ -777,7 +791,22 @@ def archive_current_chat(mode_name: str):
         "message_count": len(st.session_state.messages),
     }
 
-    st.session_state.chat_history.insert(0, snapshot)
+    existing_idx = next(
+        (idx for idx, item in enumerate(st.session_state.chat_history) if item.get("id") == chat_id),
+        -1
+    )
+    if existing_idx >= 0:
+        prev_created_at = st.session_state.chat_history[existing_idx].get("created_at", now_pretty())
+        snapshot["created_at"] = prev_created_at
+        st.session_state.chat_history[existing_idx] = snapshot
+        if existing_idx != 0:
+            moved = st.session_state.chat_history.pop(existing_idx)
+            st.session_state.chat_history.insert(0, moved)
+    else:
+        st.session_state.chat_history.insert(0, snapshot)
+
+    st.session_state.current_chat_id = chat_id
+    st.session_state.current_chat_dirty = False
     st.session_state.chat_history = st.session_state.chat_history[:30]
     save_store()
 
@@ -788,6 +817,8 @@ def load_chat_snapshot(snapshot: dict):
     st.session_state.pending_prompt = ""
     st.session_state.socratic_continue = False
     st.session_state.socratic_can_continue = False
+    st.session_state.current_chat_id = str(snapshot.get("id", ""))
+    st.session_state.current_chat_dirty = False
     mode_from_snapshot = snapshot.get("mode", "ติวละเอียด")
     if mode_from_snapshot in ["ติวละเอียด", "ฝึกทีละขั้น", "เฉลยไว"]:
         st.session_state.pending_quick_mode_restore = mode_from_snapshot
@@ -934,9 +965,13 @@ with st.sidebar:
                     load_chat_snapshot(snap)
                     st.rerun()
                 if col_d.button("ลบ", key=f"del_hist_{snap.get('id', i)}"):
+                    deleted_id = snap.get("id")
                     st.session_state.chat_history = [
-                        c for c in st.session_state.chat_history if c.get("id") != snap.get("id")
+                        c for c in st.session_state.chat_history if c.get("id") != deleted_id
                     ]
+                    if st.session_state.current_chat_id == deleted_id:
+                        st.session_state.current_chat_id = ""
+                        st.session_state.current_chat_dirty = bool(st.session_state.messages)
                     save_store()
                     st.rerun()
 
@@ -1105,6 +1140,7 @@ if prompt:
     if uploaded_img:
         user_msg["image_show"] = uploaded_img
     st.session_state.messages.append(user_msg)
+    st.session_state.current_chat_dirty = True
     save_store()
 
     with st.chat_message("user"):
@@ -1322,6 +1358,7 @@ if prompt:
             if plot_fig:
                 res_msg["plot"] = plot_fig
             st.session_state.messages.append(res_msg)
+            st.session_state.current_chat_dirty = True
             save_store()
 
         except Exception as e:
