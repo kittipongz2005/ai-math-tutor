@@ -189,6 +189,25 @@ code { color: #4facfe !important; background: rgba(79,172,254,0.1) !important; b
     margin-top: 0.75rem;
 }
 
+#selection-ask-btn {
+    position: fixed;
+    z-index: 9999;
+    display: none;
+    border: none;
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-weight: 700;
+    font-size: 0.82rem;
+    color: #0d0d1a;
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    box-shadow: 0 10px 24px rgba(0, 242, 254, 0.35);
+    cursor: pointer;
+}
+
+#selection-ask-btn:hover {
+    transform: translateY(-1px);
+}
+
 /* === EXPANDER (Thinking box) === */
 [data-testid="stExpander"] {
     background: rgba(251,191,36,0.05) !important;
@@ -249,6 +268,50 @@ img { border-radius: 10px !important; }
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<script>
+(function() {
+    if (window.__selectionAskInit__) return;
+    window.__selectionAskInit__ = true;
+
+    const btn = document.createElement('button');
+    btn.id = 'selection-ask-btn';
+    btn.innerText = 'ถามข้อความที่คลุม';
+    document.body.appendChild(btn);
+
+    let selectedText = '';
+
+    const hideBtn = () => {
+        btn.style.display = 'none';
+    };
+
+    document.addEventListener('mousedown', () => {
+        hideBtn();
+    });
+
+    document.addEventListener('mouseup', (event) => {
+        const sel = window.getSelection ? window.getSelection().toString().trim() : '';
+        if (!sel || sel.length < 2) {
+            hideBtn();
+            return;
+        }
+
+        selectedText = sel.slice(0, 500);
+        btn.style.left = `${Math.min(event.clientX + 8, window.innerWidth - 180)}px`;
+        btn.style.top = `${Math.max(event.clientY - 42, 8)}px`;
+        btn.style.display = 'block';
+    });
+
+    btn.addEventListener('click', () => {
+        if (!selectedText) return;
+        const url = new URL(window.location.href);
+        url.searchParams.set('ask_selection', selectedText);
+        window.location.href = url.toString();
+    });
+})();
+</script>
+""", unsafe_allow_html=True)
+
 # inject KaTeX for math rendering
 st.markdown("""
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
@@ -282,12 +345,6 @@ if "pending_prompt" not in st.session_state:
 
 if "weakness_counts" not in st.session_state:
     st.session_state.weakness_counts = {}
-
-if "image_ocr_text" not in st.session_state:
-    st.session_state.image_ocr_text = ""
-
-if "last_file_fingerprint" not in st.session_state:
-    st.session_state.last_file_fingerprint = ""
 
 def fix_latex(text):
     t = str(text)
@@ -424,6 +481,20 @@ def clean_snippet(text, max_len=180):
     one_line = re.sub(r'\s+', ' ', str(text)).strip()
     return (one_line[:max_len] + "...") if len(one_line) > max_len else one_line
 
+selected_from_query = st.query_params.get("ask_selection", "")
+if isinstance(selected_from_query, list):
+    selected_from_query = selected_from_query[0] if selected_from_query else ""
+
+selected_from_query = str(selected_from_query).strip()
+if selected_from_query:
+    st.session_state.pending_prompt = (
+        f"ฉันคลุมข้อความนี้จากคำตอบ AI:\n\"{selected_from_query}\"\n\n"
+        "ช่วยอธิบายส่วนนี้แบบเข้าใจง่าย พร้อมบอกสูตรที่เกี่ยวข้องและยกตัวอย่างสั้น ๆ"
+    )
+    if "ask_selection" in st.query_params:
+        del st.query_params["ask_selection"]
+    st.rerun()
+
 # -----------------------------------------
 # Sidebar
 # -----------------------------------------
@@ -518,73 +589,16 @@ with st.sidebar:
     )
 
     file_content = ""
-    reference_blocks = []
     uploaded_img = None
     base64_image = None
-    image_focus_hint = ""
-    sidebar_is_vision = "vision" in MODEL_NAME.lower()
-    enable_focus_mode = st.toggle("🎯 โหมดเลือกจุดที่สงสัย", value=False, help="เปิดเมื่ออยากเลือกเฉพาะหน้า/ช่วงข้อความ")
 
     if uploaded_file:
-        file_fingerprint = f"{uploaded_file.name}:{uploaded_file.size}"
-        if st.session_state.last_file_fingerprint != file_fingerprint:
-            st.session_state.last_file_fingerprint = file_fingerprint
-            st.session_state.image_ocr_text = ""
-            for key in ["pdf_selected_pages", "pdf_chunk_indices", "txt_chunk_indices", "ocr_line_indices"]:
-                if key in st.session_state:
-                    del st.session_state[key]
-
         ftype = uploaded_file.type
         if ftype.startswith("image/"):
             uploaded_img = Image.open(uploaded_file)
             base64_image = encode_image(uploaded_img)
             st.image(uploaded_img, caption="📸 รูปภาพที่อัปโหลด", use_container_width=True)
             st.success("✅ โหลดรูปสำเร็จ")
-
-            if enable_focus_mode:
-                image_focus_hint = st.text_input(
-                    "🎯 จุดที่สงสัยในรูป (เช่น มุมขวาบน, บรรทัดที่ 3)",
-                    placeholder="พิมพ์ตำแหน่งหรือเนื้อหาที่อยากให้โฟกัส"
-                )
-
-                if sidebar_is_vision:
-                    if st.button("🔎 ดึงข้อความจากรูป (OCR AI)", use_container_width=True):
-                        if not API_KEY.strip():
-                            st.warning("กรุณาใส่ API Key ก่อนดึงข้อความจากรูป")
-                        else:
-                            try:
-                                ocr_client = Groq(api_key=API_KEY.strip())
-                                ocr_resp = ocr_client.chat.completions.create(
-                                    model=MODEL_NAME,
-                                    messages=[
-                                        {
-                                            "role": "user",
-                                            "content": [
-                                                {"type": "text", "text": "อ่านโจทย์จากรูปนี้ แล้วสรุปเป็นบรรทัดสั้น ๆ ทีละบรรทัดเพื่อให้ผู้เรียนเลือกจุดที่สงสัย"},
-                                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                                            ]
-                                        }
-                                    ]
-                                )
-                                st.session_state.image_ocr_text = ocr_resp.choices[0].message.content or ""
-                                st.success("✅ ดึงข้อความจากรูปแล้ว")
-                            except Exception as e:
-                                st.error(f"ดึงข้อความจากรูปไม่สำเร็จ: {e}")
-                else:
-                    st.info("ℹ️ ถ้าต้องการดึงข้อความจากรูปอัตโนมัติ ให้เลือกโมเดลที่รองรับ Vision")
-
-            if enable_focus_mode and st.session_state.image_ocr_text.strip():
-                st.caption("เลือกบรรทัดที่อยากถามต่อ")
-                ocr_lines = [ln.strip(" -•\t") for ln in st.session_state.image_ocr_text.splitlines() if ln.strip()]
-                if ocr_lines:
-                    selected_ocr_idx = st.multiselect(
-                        "🧩 เลือกข้อความจากรูป",
-                        options=list(range(len(ocr_lines))),
-                        format_func=lambda idx: f"บรรทัด {idx + 1}: {clean_snippet(ocr_lines[idx], 100)}",
-                        key="ocr_line_indices"
-                    )
-                    for idx in selected_ocr_idx:
-                        reference_blocks.append(f"[ข้อความจากรูปบรรทัด {idx + 1}] {ocr_lines[idx]}")
 
         elif ftype == "application/pdf":
             try:
@@ -594,30 +608,6 @@ with st.sidebar:
                 n_pages = len(pdf_reader.pages)
                 approx_tok = count_tokens_approx(file_content)
                 st.success(f"✅ PDF {n_pages} หน้า (~{approx_tok:,} tokens)")
-
-                if enable_focus_mode:
-                    page_options = list(range(1, n_pages + 1))
-                    selected_pages = st.multiselect(
-                        "📄 เลือกหน้าที่สงสัย",
-                        options=page_options,
-                        default=page_options[:1] if page_options else [],
-                        key="pdf_selected_pages"
-                    )
-
-                    focused_pdf_text = "\n\n".join(
-                        [f"[หน้า {p}]\n{pages[p - 1]}" for p in selected_pages if 1 <= p <= n_pages]
-                    ) if selected_pages else file_content
-
-                    chunks = split_text_chunks(focused_pdf_text, chunk_size=500)
-                    if chunks:
-                        selected_chunk_indices = st.multiselect(
-                            "✂️ เลือกช่วงข้อความที่สงสัย",
-                            options=list(range(len(chunks))),
-                            format_func=lambda idx: f"ช่วง {idx + 1}: {clean_snippet(chunks[idx], 100)}",
-                            key="pdf_chunk_indices"
-                        )
-                        for idx in selected_chunk_indices:
-                            reference_blocks.append(f"[PDF ช่วง {idx + 1}] {chunks[idx]}")
             except Exception as e:
                 st.error(f"อ่าน PDF ไม่ได้: {e}")
         else:
@@ -625,25 +615,8 @@ with st.sidebar:
                 file_content = uploaded_file.getvalue().decode("utf-8")
                 approx_tok = count_tokens_approx(file_content)
                 st.success(f"✅ ไฟล์ข้อความ (~{approx_tok:,} tokens)")
-
-                if enable_focus_mode:
-                    txt_chunks = split_text_chunks(file_content, chunk_size=500)
-                    if txt_chunks:
-                        selected_txt_indices = st.multiselect(
-                            "✂️ เลือกช่วงข้อความที่สงสัย",
-                            options=list(range(len(txt_chunks))),
-                            format_func=lambda idx: f"ช่วง {idx + 1}: {clean_snippet(txt_chunks[idx], 100)}",
-                            key="txt_chunk_indices"
-                        )
-                        for idx in selected_txt_indices:
-                            reference_blocks.append(f"[TXT ช่วง {idx + 1}] {txt_chunks[idx]}")
             except:
                 st.error("อ่านไฟล์ไม่ได้")
-
-    custom_focus_question = st.text_input(
-        "❓ จุดที่ยังไม่เข้าใจ (ถ้ามี)",
-        placeholder="เช่น ทำไมขั้นนี้ต้องใช้ Integration by Parts"
-    )
 
     st.divider()
 
@@ -717,11 +690,21 @@ for msg_idx, message in enumerate(st.session_state.messages):
                 ("📝 ขอแบบฝึก", "ช่วยสร้างโจทย์คล้ายกัน 2 ข้อ และรอให้ฉันลองทำก่อนเฉลย"),
                 ("🔍 เฉพาะจุดที่งง", "ช่วยโฟกัสเฉพาะจุดที่คนมักผิดในวิธีทำข้อนี้")
             ]
+            if "Socratic" in tutor_mode:
+                follow_up_prompts = [
+                    ("➡️ ไปต่อ", "ไปต่อขั้นถัดไปจากจุดล่าสุด 1 ขั้น โดยยังไม่เฉลยทั้งหมด"),
+                    ("❓ ทำไมใช้สูตรนี้", "ช่วยอธิบายว่าทำไมถึงเลือกใช้สูตรในคำตอบนี้"),
+                    ("🧠 ขอช้าลง", "ช่วยอธิบายใหม่แบบช้าลงและละเอียดขึ้น โดยเน้นขั้นที่สับสน"),
+                    ("📝 ขอแบบฝึก", "ช่วยสร้างโจทย์คล้ายกัน 2 ข้อ และรอให้ฉันลองทำก่อนเฉลย")
+                ]
             cols = st.columns(4)
             for i, (label, q_text) in enumerate(follow_up_prompts):
                 with cols[i]:
                     if st.button(label, key=f"followup_{msg_idx}_{i}", use_container_width=True):
-                        st.session_state.pending_prompt = f"จากคำตอบนี้: {clean_snippet(final_msg_text, 220)}\n\n{q_text}"
+                        if label == "➡️ ไปต่อ":
+                            st.session_state.pending_prompt = f"จากคำตอบล่าสุดนี้: {clean_snippet(final_msg_text, 220)}\n\nไปต่อ"
+                        else:
+                            st.session_state.pending_prompt = f"จากคำตอบนี้: {clean_snippet(final_msg_text, 220)}\n\n{q_text}"
                         st.rerun()
 
         if "plot" in message:
@@ -743,7 +726,7 @@ if prompt:
         st.error("⚠️ กรุณาใส่ Groq API Key ที่แถบด้านซ้ายก่อนครับ")
         st.stop()
 
-    update_weakness_profile(f"{prompt}\n{custom_focus_question}\n" + "\n".join(reference_blocks[:2]))
+    update_weakness_profile(prompt)
 
     # บันทึก + แสดงข้อความผู้ใช้
     user_msg = {"role": "user", "content": prompt}
@@ -772,7 +755,8 @@ if prompt:
 2. ให้ถามคำถามชี้นำทีละขั้น และเว้นจังหวะให้ผู้เรียนลองคิด
 3. ให้ feedback สั้น กระชับ ชี้จุดผิดแบบเฉพาะจุด
 4. ถ้าผู้เรียนพิมพ์ว่า 'เฉลยเต็ม' ค่อยแสดงวิธีทำครบทุกขั้น
-5. ทุกสมการต้องอยู่ในรูป LaTeX"""
+5. ถ้าผู้เรียนพิมพ์ว่า 'ไปต่อ' ให้สอนขั้นถัดไปทันที 1 ขั้น โดยยังไม่เฉลยทั้งหมด
+6. ทุกสมการต้องอยู่ในรูป LaTeX"""
             elif "อธิบายละเอียด" in response_style:
                 base_sys_prompt = """คุณคืออาจารย์คณิตศาสตร์ระดับมหาวิทยาลัย (โหมดอธิบายละเอียด)
 กฎเหล็ก:
@@ -796,6 +780,7 @@ if prompt:
 2. ให้ถามคำถามชี้นำทีละขั้น แล้วรอผู้เรียนตอบ
 3. ตรวจคำตอบผู้เรียนอย่างสุภาพและชี้จุดผิดแบบเฉพาะจุด
 4. เฉลยเต็มรูปแบบได้เมื่อผู้เรียนพิมพ์ว่า 'เฉลยเต็ม' เท่านั้น
+5. ถ้าผู้เรียนพิมพ์ว่า 'ไปต่อ' ให้เดินต่อเพียง 1 ขั้น แล้วถามกลับ
 """ if "Socratic" in tutor_mode else ""
 
             profile_prompt = build_profile_prompt(learner_level, explain_speed, language_pref, tutor_mode)
@@ -814,17 +799,8 @@ if prompt:
                     content_text = f"[คำสั่งระบบ: {sys_prompt}]\n\n" + content_text
 
                 if i == len(st.session_state.messages) - 1 and role == 'user':
-                    if custom_focus_question.strip():
-                        content_text += f"\n\n[จุดที่ผู้ใช้ระบุว่าสงสัย]:\n{custom_focus_question.strip()}"
-
-                    if reference_blocks:
-                        focused_ref = "\n\n".join(reference_blocks[:8])
-                        content_text += f"\n\n[ข้อมูลอ้างอิงเฉพาะส่วนที่ผู้ใช้เลือก]:\n{focused_ref}"
-                    elif file_content:
+                    if file_content:
                         content_text += f"\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n{file_content[:4000]}"
-
-                    if image_focus_hint.strip():
-                        content_text += f"\n\n[ตำแหน่งที่ผู้ใช้ให้โฟกัสในรูป]: {image_focus_hint.strip()}"
 
                     if base64_image:
                         if is_vision:
