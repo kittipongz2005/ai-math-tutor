@@ -6,6 +6,7 @@ import re
 import base64
 import copy
 import json
+import importlib
 from datetime import datetime
 from pathlib import Path
 from PIL import Image
@@ -13,7 +14,39 @@ import matplotlib.pyplot as plt
 import numpy as np
 from groq import Groq
 
+SUPABASE_AVAILABLE = True
+
 STORE_PATH = Path(".math_tutor_store.json")
+
+
+def get_secret(name: str, default: str = "") -> str:
+    try:
+        value = st.secrets.get(name, default)
+        return str(value) if value is not None else default
+    except Exception:
+        return default
+
+
+SUPABASE_URL = get_secret("SUPABASE_URL", "")
+SUPABASE_KEY = get_secret("SUPABASE_KEY", "")
+SUPABASE_TABLE = get_secret("SUPABASE_TABLE", "math_tutor_store")
+SUPABASE_USER_ID = get_secret("SUPABASE_USER_ID", "default_user")
+
+
+def supabase_ready() -> bool:
+    return SUPABASE_AVAILABLE and bool(SUPABASE_URL) and bool(SUPABASE_KEY)
+
+
+@st.cache_resource(show_spinner=False)
+def get_supabase_client(url: str, key: str):
+    try:
+        supabase_module = importlib.import_module("supabase")
+        create_client = getattr(supabase_module, "create_client", None)
+        if create_client is None:
+            return None
+        return create_client(url, key)
+    except Exception:
+        return None
 
 # ─────────────────────────────────────────────
 #  Page Config
@@ -698,20 +731,37 @@ def sanitize_messages_for_storage(messages: list) -> list:
 
 
 def save_store():
+    payload = {
+        "chat_history": st.session_state.chat_history,
+        "current_chat": {
+            "messages": sanitize_messages_for_storage(st.session_state.messages),
+            "weakness_counts": st.session_state.weakness_counts,
+            "quick_mode": st.session_state.quick_mode,
+            "last_quick_mode": st.session_state.last_quick_mode,
+            "chat_id": st.session_state.current_chat_id,
+            "dirty": st.session_state.current_chat_dirty,
+        },
+        "updated_at": now_iso(),
+        "version": 1,
+    }
+
+    if supabase_ready():
+        try:
+            client = get_supabase_client(SUPABASE_URL, SUPABASE_KEY)
+            if client is not None:
+                client.table(SUPABASE_TABLE).upsert(
+                    {
+                        "user_id": SUPABASE_USER_ID,
+                        "payload": payload,
+                        "updated_at": now_iso(),
+                    },
+                    on_conflict="user_id",
+                ).execute()
+                return
+        except Exception:
+            pass
+
     try:
-        payload = {
-            "chat_history": st.session_state.chat_history,
-            "current_chat": {
-                "messages": sanitize_messages_for_storage(st.session_state.messages),
-                "weakness_counts": st.session_state.weakness_counts,
-                "quick_mode": st.session_state.quick_mode,
-                "last_quick_mode": st.session_state.last_quick_mode,
-                "chat_id": st.session_state.current_chat_id,
-                "dirty": st.session_state.current_chat_dirty,
-            },
-            "updated_at": now_iso(),
-            "version": 1,
-        }
         STORE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -722,13 +772,24 @@ def load_store_once():
         return
     st.session_state.storage_loaded = True
 
-    if not STORE_PATH.exists():
-        return
+    payload = None
+    if supabase_ready():
+        try:
+            client = get_supabase_client(SUPABASE_URL, SUPABASE_KEY)
+            if client is not None:
+                result = client.table(SUPABASE_TABLE).select("payload").eq("user_id", SUPABASE_USER_ID).limit(1).execute()
+                if result and getattr(result, "data", None):
+                    payload = result.data[0].get("payload")
+        except Exception:
+            payload = None
 
-    try:
-        payload = json.loads(STORE_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return
+    if payload is None:
+        if not STORE_PATH.exists():
+            return
+        try:
+            payload = json.loads(STORE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return
 
     history = payload.get("chat_history", [])
     if isinstance(history, list):
