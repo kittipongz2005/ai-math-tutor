@@ -532,9 +532,11 @@ def ensure_math_renderable(text: str) -> str:
     return t
 
 
-def beautify_answer_text(text: str) -> str:
+def beautify_answer_text(text: str, decorate_final: bool = True) -> str:
     t = fix_latex(text)
     t = ensure_math_renderable(t)
+    if not decorate_final:
+        return t
     pat = re.compile(r'(\*\*คำตอบสุดท้าย:?\*\*|คำตอบสุดท้าย:)\s*(.+)', re.DOTALL)
     m = pat.search(t)
     if not m:
@@ -778,6 +780,8 @@ for msg_idx, message in enumerate(st.session_state.messages):
             st.image(message["image_show"], width=260)
 
         content = message["content"]
+        is_quick_solve_msg = message.get("response_style") == "⚡️ เฉลยอย่างเดียว"
+        decorate_final = not is_quick_solve_msg
 
         if message["role"] == "assistant" and "</think>" in str(content):
             parts       = str(content).split("</think>")
@@ -788,9 +792,9 @@ for msg_idx, message in enumerate(st.session_state.messages):
                     f'<div class="think-stream">{think_text}</div>',
                     unsafe_allow_html=True,
                 )
-            st.markdown(beautify_answer_text(answer_text), unsafe_allow_html=True)
+            st.markdown(beautify_answer_text(answer_text, decorate_final=decorate_final), unsafe_allow_html=True)
         else:
-            st.markdown(beautify_answer_text(str(content)), unsafe_allow_html=True)
+            st.markdown(beautify_answer_text(str(content), decorate_final=decorate_final), unsafe_allow_html=True)
 
         if "plot" in message:
             st.pyplot(message["plot"])
@@ -965,12 +969,18 @@ if prompt:
                         if status_box:
                             status_box.update(label="✅ วิเคราะห์เสร็จ", state="complete", expanded=False)
                     ans_ph.markdown(
-                        beautify_answer_text(full_response.split("</think>")[-1]) + " ▌",
+                        beautify_answer_text(
+                            full_response.split("</think>")[-1],
+                            decorate_final=(response_style != "⚡️ เฉลยอย่างเดียว")
+                        ) + " ▌",
                         unsafe_allow_html=True,
                     )
                 else:
                     ans_ph.markdown(
-                        beautify_answer_text(full_response) + " ▌",
+                        beautify_answer_text(
+                            full_response,
+                            decorate_final=(response_style != "⚡️ เฉลยอย่างเดียว")
+                        ) + " ▌",
                         unsafe_allow_html=True,
                     )
 
@@ -980,7 +990,13 @@ if prompt:
                 if "</think>" in full_response
                 else full_response
             )
-            ans_ph.markdown(beautify_answer_text(final_answer).strip(), unsafe_allow_html=True)
+            ans_ph.markdown(
+                beautify_answer_text(
+                    final_answer,
+                    decorate_final=(response_style != "⚡️ เฉลยอย่างเดียว")
+                ).strip(),
+                unsafe_allow_html=True,
+            )
 
             # ── Socratic continue button (after streaming)
             if "Socratic" in tutor_mode:
@@ -1017,7 +1033,12 @@ if prompt:
             st.caption(f"⚡ {elapsed:.2f}s  ·  {model_short}  ·  {'Socratic' if 'Socratic' in tutor_mode else response_style.split()[0]}")
 
             # Save response
-            res_msg: dict = {"role": "assistant", "content": full_response}
+            res_msg: dict = {
+                "role": "assistant",
+                "content": full_response,
+                "response_style": response_style,
+                "tutor_mode": tutor_mode,
+            }
             if plot_fig:
                 res_msg["plot"] = plot_fig
             st.session_state.messages.append(res_msg)
