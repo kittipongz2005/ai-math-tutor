@@ -10,26 +10,276 @@ import numpy as np
 from groq import Groq
 
 # -----------------------------------------
-# 1. ตั้งค่าหน้าเว็บ
+# ตั้งค่าหน้าเว็บ
 # -----------------------------------------
-st.set_page_config(page_title="Math AI Cloud Ultimate", page_icon="🚀", layout="wide")
-st.title("🚀 ติวเตอร์คณิตศาสตร์ AI (Cloud Edition)")
+st.set_page_config(
+    page_title="Math AI Tutor",
+    page_icon="🧮",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # -----------------------------------------
-# 2. จัดการ State & ฟังก์ชันช่วยเหลือ
+# Custom CSS - Dark Mode + Glassmorphism
+# -----------------------------------------
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap');
+
+/* === GLOBAL RESET === */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, [class*="css"] {
+    font-family: 'Inter', 'Noto Sans Thai', sans-serif;
+}
+
+/* === DARK BACKGROUND === */
+.stApp {
+    background: linear-gradient(135deg, #0d0d1a 0%, #0a1628 40%, #0d1f2d 100%);
+    min-height: 100vh;
+}
+
+/* === MAIN CONTENT AREA === */
+.block-container {
+    padding-top: 2rem !important;
+    padding-bottom: 2rem !important;
+    max-width: 900px !important;
+}
+
+/* === TITLE === */
+h1 {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 50%, #a78bfa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-weight: 700 !important;
+    font-size: 2rem !important;
+    letter-spacing: -0.5px;
+    margin-bottom: 0.25rem !important;
+}
+
+/* === SIDEBAR === */
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0f1923 0%, #111827 100%) !important;
+    border-right: 1px solid rgba(79, 172, 254, 0.15) !important;
+}
+
+[data-testid="stSidebar"] .block-container {
+    padding: 1.5rem 1rem !important;
+}
+
+/* Sidebar Headers */
+[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
+    color: #4facfe !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 0.75rem !important;
+}
+
+/* === INPUT FIELDS === */
+[data-testid="stTextInput"] input,
+[data-testid="stSelectbox"] select {
+    background: rgba(255,255,255,0.05) !important;
+    border: 1px solid rgba(79,172,254,0.25) !important;
+    border-radius: 10px !important;
+    color: #e2e8f0 !important;
+    font-family: 'Inter', 'Noto Sans Thai', sans-serif !important;
+}
+
+[data-testid="stTextInput"] input:focus {
+    border-color: rgba(79,172,254,0.7) !important;
+    box-shadow: 0 0 0 3px rgba(79,172,254,0.12) !important;
+}
+
+/* === BUTTONS === */
+.stButton button {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%) !important;
+    color: #0d0d1a !important;
+    border: none !important;
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+    font-family: 'Inter', 'Noto Sans Thai', sans-serif !important;
+    transition: all 0.2s ease !important;
+    padding: 0.5rem 1rem !important;
+}
+
+.stButton button:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 6px 20px rgba(79,172,254,0.35) !important;
+}
+
+/* === FILE UPLOADER === */
+[data-testid="stFileUploader"] {
+    background: rgba(79,172,254,0.04) !important;
+    border: 1.5px dashed rgba(79,172,254,0.3) !important;
+    border-radius: 12px !important;
+    padding: 0.75rem !important;
+    transition: border-color 0.2s ease !important;
+}
+
+[data-testid="stFileUploader"]:hover {
+    border-color: rgba(79,172,254,0.6) !important;
+}
+
+/* === CHAT MESSAGES === */
+[data-testid="stChatMessage"] {
+    background: rgba(255,255,255,0.03) !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    border-radius: 16px !important;
+    padding: 1rem 1.25rem !important;
+    margin-bottom: 0.75rem !important;
+    backdrop-filter: blur(10px) !important;
+}
+
+/* User message */
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
+    background: rgba(79,172,254,0.08) !important;
+    border-color: rgba(79,172,254,0.15) !important;
+}
+
+/* AI message */
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) {
+    background: rgba(167,139,250,0.06) !important;
+    border-color: rgba(167,139,250,0.12) !important;
+}
+
+/* === CHAT INPUT === */
+[data-testid="stChatInput"] {
+    background: rgba(255,255,255,0.05) !important;
+    border: 1.5px solid rgba(79,172,254,0.3) !important;
+    border-radius: 14px !important;
+    backdrop-filter: blur(10px) !important;
+}
+
+[data-testid="stChatInput"]:focus-within {
+    border-color: rgba(79,172,254,0.7) !important;
+    box-shadow: 0 0 0 3px rgba(79,172,254,0.1) !important;
+}
+
+[data-testid="stChatInput"] textarea {
+    color: #e2e8f0 !important;
+    font-family: 'Inter', 'Noto Sans Thai', sans-serif !important;
+}
+
+/* === TEXT COLORS === */
+p, li, span, label { color: #cbd5e1 !important; }
+strong { color: #e2e8f0 !important; }
+code { color: #4facfe !important; background: rgba(79,172,254,0.1) !important; border-radius: 4px !important; padding: 1px 5px !important; }
+
+/* === EXPANDER (Thinking box) === */
+[data-testid="stExpander"] {
+    background: rgba(251,191,36,0.05) !important;
+    border: 1px solid rgba(251,191,36,0.2) !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+}
+
+[data-testid="stExpander"] summary {
+    color: #fbbf24 !important;
+    font-weight: 600 !important;
+}
+
+/* === STATUS CONTAINER === */
+[data-testid="stStatus"] {
+    background: rgba(79,172,254,0.06) !important;
+    border: 1px solid rgba(79,172,254,0.2) !important;
+    border-radius: 12px !important;
+}
+
+/* === DIVIDER === */
+hr {
+    border-color: rgba(255,255,255,0.08) !important;
+    margin: 1rem 0 !important;
+}
+
+/* === SUCCESS / ERROR / INFO === */
+[data-testid="stAlert"] {
+    border-radius: 10px !important;
+    border-left-width: 3px !important;
+}
+
+/* === CAPTION === */
+.stCaption { color: #64748b !important; font-size: 0.75rem !important; }
+
+/* === SCROLLBAR === */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(79,172,254,0.3); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(79,172,254,0.6); }
+
+/* === IMAGE IN CHAT === */
+img { border-radius: 10px !important; }
+
+/* === SUBHEADER BADGE === */
+.model-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, #4facfe22, #a78bfa22);
+    border: 1px solid rgba(167,139,250,0.3);
+    border-radius: 20px;
+    padding: 3px 12px;
+    font-size: 0.75rem;
+    color: #a78bfa;
+    font-weight: 500;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# inject KaTeX for math rendering
+st.markdown("""
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {
+        delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false
+    });"></script>
+""", unsafe_allow_html=True)
+
+# -----------------------------------------
+# Header
+# -----------------------------------------
+col_title, col_badge = st.columns([3, 1])
+with col_title:
+    st.title("🧮 Math AI Tutor")
+    st.caption("ติวเตอร์คณิตศาสตร์ AI — อธิบายละเอียด ทุกขั้นตอน")
+
+# -----------------------------------------
+# State & Helper Functions
 # -----------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "pending_prompt" not in st.session_state:
+    st.session_state.pending_prompt = ""
+
+if "weakness_counts" not in st.session_state:
+    st.session_state.weakness_counts = {}
+
+if "image_ocr_text" not in st.session_state:
+    st.session_state.image_ocr_text = ""
+
+if "last_file_fingerprint" not in st.session_state:
+    st.session_state.last_file_fingerprint = ""
+
 def fix_latex(text):
-    t = str(text).replace(r'\[', '$$').replace(r'\]', '$$').replace(r'\(', '$').replace(r'\)', '$')
+    t = str(text)
+    t = t.replace(r'\[', '$$').replace(r'\]', '$$')
+    t = t.replace(r'\(', '$').replace(r'\)', '$')
     translate_dict = {
         'Wykładnik': 'เลขชี้กำลัง', 'wykładnik': 'เลขชี้กำลัง',
         'tích phân': 'อินทิเกรต', 'Тогда': 'ดังนั้น', 'тогда': 'ดังนั้น',
         'Подставляем обратно': 'แทนค่ากลับลงไป', 'Ответ': 'คำตอบสุดท้าย:',
         'Получаем': 'จะได้ว่า', 'Следовательно': 'สรุปได้ว่า',
         'Имеем': 'เราจะได้', 'Где': 'โดยที่',
-        'Интегрирование по частям': 'Integration by Parts', 'formula': 'สูตร', 'Formula': 'สูตร'
+        'Интегрирование по частям': 'Integration by Parts',
+        'formula': 'สูตร', 'Formula': 'สูตร'
     }
     for foreign, th in translate_dict.items():
         t = t.replace(foreign, th)
@@ -41,175 +291,471 @@ def encode_image(img):
     img.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
+def count_tokens_approx(text):
+    """ประมาณจำนวน Token (หยาบๆ) จากจำนวนอักขระ"""
+    return max(1, len(str(text)) // 4)
+
+def split_text_chunks(text, chunk_size=700):
+    text = (text or "").strip()
+    if not text:
+        return []
+    normalized = re.sub(r'\n{3,}', '\n\n', text)
+    paragraphs = [p.strip() for p in normalized.split("\n\n") if p.strip()]
+    chunks = []
+    current = ""
+    for para in paragraphs:
+        candidate = f"{current}\n\n{para}".strip() if current else para
+        if len(candidate) <= chunk_size:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            if len(para) <= chunk_size:
+                current = para
+            else:
+                for i in range(0, len(para), chunk_size):
+                    chunks.append(para[i:i + chunk_size])
+                current = ""
+    if current:
+        chunks.append(current)
+    return chunks
+
+def extract_topics(text):
+    topic_keywords = {
+        "พีชคณิต": ["สมการ", "แยกตัวประกอบ", "กำลัง", "log", "พหุนาม", "algebra"],
+        "แคลคูลัส": ["อนุพันธ์", "อินทิเกรต", "ลิมิต", "ปริพันธ์", "derivative", "integral", "limit"],
+        "ตรีโกณมิติ": ["sin", "cos", "tan", "ตรีโกณ", "เรเดียน", "มุม"],
+        "เรขาคณิต": ["พื้นที่", "ปริมาตร", "วงกลม", "สามเหลี่ยม", "เรขาคณิต", "geometry"],
+        "สถิติ": ["ความน่าจะเป็น", "ค่าเฉลี่ย", "ส่วนเบี่ยงเบน", "variance", "probability", "statistics"],
+        "เมทริกซ์": ["เมทริกซ์", "det", "determinant", "eigen", "เวกเตอร์", "vector"]
+    }
+    lower = str(text).lower()
+    found = []
+    for topic, keywords in topic_keywords.items():
+        if any(k.lower() in lower for k in keywords):
+            found.append(topic)
+    return found
+
+def update_weakness_profile(text):
+    for topic in extract_topics(text):
+        st.session_state.weakness_counts[topic] = st.session_state.weakness_counts.get(topic, 0) + 1
+
+def build_profile_prompt(level, explain_speed, language_pref, tutor_mode):
+    return f"""
+ข้อมูลผู้เรียน:
+- ระดับผู้เรียน: {level}
+- ความเร็วการสอน: {explain_speed}
+- ภาษาที่ใช้ตอบ: {language_pref}
+- โหมดการติว: {tutor_mode}
+
+ข้อกำหนดเพิ่มเติม:
+1. ปรับระดับเนื้อหาให้เหมาะกับระดับผู้เรียน
+2. ถ้าผู้เรียนบอกว่าติดตรงไหน ให้โฟกัสแก้จุดนั้นก่อน
+3. ใช้คำอธิบายสั้น/ยาวตามความเร็วการสอนที่เลือก
+""".strip()
+
+def clean_snippet(text, max_len=180):
+    one_line = re.sub(r'\s+', ' ', str(text)).strip()
+    return (one_line[:max_len] + "...") if len(one_line) > max_len else one_line
+
 # -----------------------------------------
-# 3. แถบเครื่องมือด้านข้าง (Sidebar)
+# Sidebar
 # -----------------------------------------
 with st.sidebar:
-    st.header("☁️ ตั้งค่าระบบ Cloud")
-    
-    API_KEY = st.text_input("🔑 ใส่ Groq API Key:", type="password", help="รับฟรีที่ console.groq.com")
-    
-    # อัปเดตรายชื่อโมเดลที่ Groq รองรับ ณ ปัจจุบัน
-    MODEL_NAME = st.selectbox(
-        "ชื่อโมเดล (Groq):", 
-        [
-            "llama-3.3-70b-versatile",    # ตัวหลัก ฉลาดและเร็วมาก
-            "llama-3.1-8b-instant",       # ตัวรอง เร็วปานสายฟ้า
-            "mixtral-8x7b-32768"          # ตัวเลือกเสริม เก่งคณิตศาสตร์
-        ]
+    st.markdown("## ☁️ ตั้งค่าระบบ")
+
+    API_KEY = st.text_input(
+        "🔑 Groq API Key",
+        type="password",
+        placeholder="gsk_...",
+        help="รับฟรีที่ console.groq.com"
     )
-    st.caption("💡 แนะนำให้ใช้ llama-3.3-70b-versatile เป็นหลักครับ")
+
+    MODEL_NAME = st.selectbox(
+        "🤖 เลือกโมเดล",
+        [
+            "deepseek-r1-distill-llama-70b",
+            "qwen/qwen3-32b",
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "mixtral-8x7b-32768",
+        ],
+        help="deepseek-r1 แนะนำที่สุดสำหรับคณิตศาสตร์"
+    )
+
+    # Model badge
+    model_short = MODEL_NAME.split("/")[-1].split("-distill")[0]
+    st.markdown(f'<span class="model-badge">✨ {model_short}</span>', unsafe_allow_html=True)
 
     response_style = st.selectbox(
-        "รูปแบบการตอบของ AI:",
-        ["📝 สอนและอธิบายละเอียด", "⚡️ เฉลยอย่างเดียว (กระชับ)"],
+        "📐 รูปแบบการตอบ",
+        ["📝 สอนและอธิบายละเอียด", "⚡️ เฉลยอย่างเดียว"],
         key="style_memory"
     )
 
+    tutor_mode = st.selectbox(
+        "🎯 โหมดติวเตอร์",
+        ["โหมดปกติ", "โหมดฝึกทีละขั้น (Socratic)"],
+        help="โหมดฝึกจะไม่เฉลยรวดเดียว แต่จะพาคิดทีละขั้นเหมือนติวเตอร์ส่วนตัว"
+    )
+
+    learner_level = st.selectbox(
+        "🧑‍🎓 ระดับผู้เรียน",
+        ["ม.ต้น", "ม.ปลาย", "มหาวิทยาลัยปีต้น", "มหาวิทยาลัยปีสูง"]
+    )
+
+    explain_speed = st.selectbox(
+        "⏱️ ความเร็วการอธิบาย",
+        ["ช้าและละเอียด", "พอดี", "กระชับเร็ว"]
+    )
+
+    language_pref = st.selectbox(
+        "🌐 ภาษาในการตอบ",
+        ["ไทย", "ไทย+อังกฤษศัพท์สำคัญ", "English"]
+    )
+
     st.divider()
 
-    st.header("📤 อัปโหลดเอกสาร/รูปภาพ")
-    uploaded_file = st.file_uploader("แนบไฟล์ PDF, TXT หรือรูปโจทย์", type=["pdf", "txt", "png", "jpg", "jpeg"])
+    # --- Upload Section ---
+    st.markdown("## 📎 แนบไฟล์")
+    uploaded_file = st.file_uploader(
+        "PDF, TXT หรือรูปโจทย์",
+        type=["pdf", "txt", "png", "jpg", "jpeg"],
+        label_visibility="collapsed"
+    )
 
     file_content = ""
+    reference_blocks = []
     uploaded_img = None
     base64_image = None
+    image_focus_hint = ""
+    sidebar_is_vision = "vision" in MODEL_NAME.lower()
 
     if uploaded_file:
-        if uploaded_file.type.startswith("image/"):
+        file_fingerprint = f"{uploaded_file.name}:{uploaded_file.size}"
+        if st.session_state.last_file_fingerprint != file_fingerprint:
+            st.session_state.last_file_fingerprint = file_fingerprint
+            st.session_state.image_ocr_text = ""
+            for key in ["pdf_selected_pages", "pdf_chunk_indices", "txt_chunk_indices", "ocr_line_indices"]:
+                if key in st.session_state:
+                    del st.session_state[key]
+
+        ftype = uploaded_file.type
+        if ftype.startswith("image/"):
             uploaded_img = Image.open(uploaded_file)
             base64_image = encode_image(uploaded_img)
-            st.image(uploaded_img, caption="รูปภาพที่อัปโหลด", use_container_width=True)
-        elif uploaded_file.type == "application/pdf":
+            st.image(uploaded_img, caption="📸 รูปภาพที่อัปโหลด", use_container_width=True)
+            st.success("✅ โหลดรูปสำเร็จ")
+
+            image_focus_hint = st.text_input(
+                "🎯 จุดที่สงสัยในรูป (เช่น มุมขวาบน, บรรทัดที่ 3)",
+                placeholder="พิมพ์ตำแหน่งหรือเนื้อหาที่อยากให้โฟกัส"
+            )
+
+            if sidebar_is_vision:
+                if st.button("🔎 ดึงข้อความจากรูป (OCR AI)", use_container_width=True):
+                    if not API_KEY.strip():
+                        st.warning("กรุณาใส่ API Key ก่อนดึงข้อความจากรูป")
+                    else:
+                        try:
+                            ocr_client = Groq(api_key=API_KEY.strip())
+                            ocr_resp = ocr_client.chat.completions.create(
+                                model=MODEL_NAME,
+                                messages=[
+                                    {
+                                        "role": "user",
+                                        "content": [
+                                            {"type": "text", "text": "อ่านโจทย์จากรูปนี้ แล้วสรุปเป็นบรรทัดสั้น ๆ ทีละบรรทัดเพื่อให้ผู้เรียนเลือกจุดที่สงสัย"},
+                                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                                        ]
+                                    }
+                                ]
+                            )
+                            st.session_state.image_ocr_text = ocr_resp.choices[0].message.content or ""
+                            st.success("✅ ดึงข้อความจากรูปแล้ว")
+                        except Exception as e:
+                            st.error(f"ดึงข้อความจากรูปไม่สำเร็จ: {e}")
+            else:
+                st.info("ℹ️ ถ้าต้องการดึงข้อความจากรูปอัตโนมัติ ให้เลือกโมเดลที่รองรับ Vision")
+
+            if st.session_state.image_ocr_text.strip():
+                st.caption("เลือกบรรทัดที่อยากถามต่อ")
+                ocr_lines = [ln.strip(" -•\t") for ln in st.session_state.image_ocr_text.splitlines() if ln.strip()]
+                if ocr_lines:
+                    selected_ocr_idx = st.multiselect(
+                        "🧩 เลือกข้อความจากรูป",
+                        options=list(range(len(ocr_lines))),
+                        format_func=lambda idx: f"บรรทัด {idx + 1}: {clean_snippet(ocr_lines[idx], 100)}",
+                        key="ocr_line_indices"
+                    )
+                    for idx in selected_ocr_idx:
+                        reference_blocks.append(f"[ข้อความจากรูปบรรทัด {idx + 1}] {ocr_lines[idx]}")
+
+        elif ftype == "application/pdf":
             try:
                 pdf_reader = PyPDF2.PdfReader(uploaded_file)
-                file_content = "\n".join([page.extract_text() for page in pdf_reader.pages])
-                st.success("✅ อ่าน PDF สำเร็จ")
-            except: st.error("อ่าน PDF ไม่ได้")
+                pages = [page.extract_text() or "" for page in pdf_reader.pages]
+                file_content = "\n".join(pages)
+                n_pages = len(pdf_reader.pages)
+                approx_tok = count_tokens_approx(file_content)
+                st.success(f"✅ PDF {n_pages} หน้า (~{approx_tok:,} tokens)")
+
+                page_options = list(range(1, n_pages + 1))
+                selected_pages = st.multiselect(
+                    "📄 เลือกหน้าที่สงสัย",
+                    options=page_options,
+                    default=page_options[:1] if page_options else [],
+                    key="pdf_selected_pages"
+                )
+
+                focused_pdf_text = "\n\n".join(
+                    [f"[หน้า {p}]\n{pages[p - 1]}" for p in selected_pages if 1 <= p <= n_pages]
+                ) if selected_pages else file_content
+
+                chunks = split_text_chunks(focused_pdf_text, chunk_size=500)
+                if chunks:
+                    selected_chunk_indices = st.multiselect(
+                        "✂️ เลือกช่วงข้อความที่สงสัย",
+                        options=list(range(len(chunks))),
+                        format_func=lambda idx: f"ช่วง {idx + 1}: {clean_snippet(chunks[idx], 100)}",
+                        key="pdf_chunk_indices"
+                    )
+                    for idx in selected_chunk_indices:
+                        reference_blocks.append(f"[PDF ช่วง {idx + 1}] {chunks[idx]}")
+            except Exception as e:
+                st.error(f"อ่าน PDF ไม่ได้: {e}")
         else:
-            file_content = uploaded_file.getvalue().decode("utf-8")
-            st.success("✅ อ่านไฟล์สำเร็จ")
+            try:
+                file_content = uploaded_file.getvalue().decode("utf-8")
+                approx_tok = count_tokens_approx(file_content)
+                st.success(f"✅ ไฟล์ข้อความ (~{approx_tok:,} tokens)")
+
+                txt_chunks = split_text_chunks(file_content, chunk_size=500)
+                if txt_chunks:
+                    selected_txt_indices = st.multiselect(
+                        "✂️ เลือกช่วงข้อความที่สงสัย",
+                        options=list(range(len(txt_chunks))),
+                        format_func=lambda idx: f"ช่วง {idx + 1}: {clean_snippet(txt_chunks[idx], 100)}",
+                        key="txt_chunk_indices"
+                    )
+                    for idx in selected_txt_indices:
+                        reference_blocks.append(f"[TXT ช่วง {idx + 1}] {txt_chunks[idx]}")
+            except:
+                st.error("อ่านไฟล์ไม่ได้")
+
+    custom_focus_question = st.text_area(
+        "❓ จุดที่ยังไม่เข้าใจเป็นพิเศษ",
+        placeholder="เช่น ทำไมขั้นนี้ต้องใช้ Integration by Parts หรือช่วยอธิบายเฉพาะการแทนค่า",
+        height=80
+    )
 
     st.divider()
 
-    if st.button("🗑️ ล้างแชท", use_container_width=True):
+    # --- Stats & Actions ---
+    total_msgs = len(st.session_state.messages)
+    total_chars = sum(len(str(m.get("content", ""))) for m in st.session_state.messages)
+
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        st.metric("💬 ข้อความ", total_msgs)
+    with col_s2:
+        st.metric("📊 ~Tokens", f"{count_tokens_approx(total_chars * 4):,}")
+
+    if st.session_state.weakness_counts:
+        st.markdown("### 📌 จุดที่ควรทบทวน")
+        top_topics = sorted(
+            st.session_state.weakness_counts.items(),
+            key=lambda item: item[1],
+            reverse=True
+        )[:3]
+        topic_to_prompt = {
+            "พีชคณิต": "ช่วยออกแบบแบบฝึกหัดพีชคณิต 3 ข้อ โดยไล่ง่ายไปยากและเฉลยทีละขั้น",
+            "แคลคูลัส": "ช่วยทบทวนแคลคูลัสหัวข้ออนุพันธ์/อินทิเกรตแบบสั้น แล้วให้โจทย์ฝึก 2 ข้อ",
+            "ตรีโกณมิติ": "ช่วยสรุปตรีโกณมิติที่มักสับสน พร้อมตัวอย่างโจทย์ 2 ข้อ",
+            "เรขาคณิต": "ช่วยสรุปสูตรเรขาคณิตที่ต้องจำ และทดสอบฉันด้วยโจทย์ 2 ข้อ",
+            "สถิติ": "ช่วยติวสถิติพื้นฐานแบบเข้าใจง่าย พร้อมโจทย์ฝึก 2 ข้อ",
+            "เมทริกซ์": "ช่วยสอนเมทริกซ์ทีละขั้น และให้แบบฝึกหัดพร้อมตรวจคำตอบ"
+        }
+        for topic, cnt in top_topics:
+            st.write(f"- {topic} ({cnt} ครั้ง)")
+            if st.button(f"ฝึกเพิ่ม: {topic}", key=f"practice_{topic}", use_container_width=True):
+                st.session_state.pending_prompt = topic_to_prompt.get(topic, f"ช่วยสอนเรื่อง {topic} แบบติวเตอร์ส่วนตัว")
+                st.rerun()
+
+    if st.button("🗑️ ล้างการสนทนา", use_container_width=True):
         st.session_state.messages = []
+        st.session_state.pending_prompt = ""
+        st.session_state.weakness_counts = {}
         st.rerun()
 
+    st.caption("🔒 API Key ของคุณไม่ถูกบันทึก")
+
 # -----------------------------------------
-# 4. แสดงประวัติแชทบนหน้าจอ
+# แสดงประวัติแชท
 # -----------------------------------------
-for message in st.session_state.messages:
+for msg_idx, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         if "image_show" in message:
-            st.image(message["image_show"], width=300)
+            st.image(message["image_show"], width=280)
 
         content = message["content"]
+
         if message["role"] == "assistant" and "</think>" in str(content):
             parts = str(content).split("</think>")
-            with st.expander("💡 ดูเบื้องหลังการคิด"):
-                st.write(parts[0].replace("<think>", "").strip())
-            st.markdown(fix_latex(parts[1].strip()))
+            think_text = parts[0].replace("<think>", "").strip()
+            answer_text = parts[1].strip()
+
+            with st.expander("💡 กระบวนการคิดของ AI", expanded=False):
+                st.markdown(f'<div style="font-size:0.85rem; color:#94a3b8; line-height:1.7;">{think_text}</div>',
+                            unsafe_allow_html=True)
+            st.markdown(fix_latex(answer_text))
         else:
-            st.markdown(fix_latex(content))
+            st.markdown(fix_latex(str(content)))
+
+        if message["role"] == "assistant":
+            final_msg_text = str(content).split("</think>")[-1].strip()
+            follow_up_prompts = [
+                ("❓ ทำไมใช้สูตรนี้", "ช่วยอธิบายว่าทำไมถึงเลือกใช้สูตรในคำตอบนี้"),
+                ("🧠 ขอช้าลง", "ช่วยอธิบายใหม่แบบช้าลงและละเอียดขึ้น โดยเน้นขั้นที่สับสน"),
+                ("📝 ขอแบบฝึก", "ช่วยสร้างโจทย์คล้ายกัน 2 ข้อ และรอให้ฉันลองทำก่อนเฉลย"),
+                ("🔍 เฉพาะจุดที่งง", "ช่วยโฟกัสเฉพาะจุดที่คนมักผิดในวิธีทำข้อนี้")
+            ]
+            cols = st.columns(4)
+            for i, (label, q_text) in enumerate(follow_up_prompts):
+                with cols[i]:
+                    if st.button(label, key=f"followup_{msg_idx}_{i}", use_container_width=True):
+                        st.session_state.pending_prompt = f"จากคำตอบนี้: {clean_snippet(final_msg_text, 220)}\n\n{q_text}"
+                        st.rerun()
 
         if "plot" in message:
             st.pyplot(message["plot"])
 
 # -----------------------------------------
-# 5. รับข้อความ & จัดการข้อมูลให้ตรงตามกฎแต่ละโมเดล
+# Chat Input & AI Response
 # -----------------------------------------
-if prompt := st.chat_input("พิมพ์โจทย์ หรือสั่งให้ AI วิเคราะห์..."):
-    
+typed_prompt = st.chat_input("✏️  พิมพ์โจทย์คณิตศาสตร์ หรือถามสิ่งที่สงสัย...")
+queued_prompt = st.session_state.pending_prompt.strip()
+prompt = typed_prompt if typed_prompt else (queued_prompt if queued_prompt else "")
+
+if prompt:
+
+    if queued_prompt and not typed_prompt:
+        st.session_state.pending_prompt = ""
+
     if not API_KEY.strip():
-        st.error("⚠️ กรุณาใส่ Groq API Key ที่แถบด้านซ้ายก่อนครับ!")
+        st.error("⚠️ กรุณาใส่ Groq API Key ที่แถบด้านซ้ายก่อนครับ")
         st.stop()
 
-    # บันทึกโจทย์ที่ผู้ใช้พิมพ์โชว์บนหน้าจอ
+    update_weakness_profile(f"{prompt}\n{custom_focus_question}\n" + "\n".join(reference_blocks[:2]))
+
+    # บันทึก + แสดงข้อความผู้ใช้
     user_msg = {"role": "user", "content": prompt}
     if uploaded_img:
         user_msg["image_show"] = uploaded_img
-    
     st.session_state.messages.append(user_msg)
-    
+
     with st.chat_message("user"):
         if uploaded_img:
-            st.image(uploaded_img, width=300)
+            st.image(uploaded_img, width=280)
         st.markdown(prompt)
 
-    # เริ่มเรียกใช้งาน AI
+    # เรียก AI
     with st.chat_message("assistant"):
         try:
             client = Groq(api_key=API_KEY.strip())
-            
-            # --- ระบบสับราง (ดักจับประเภทโมเดล) ---
+
             is_deepseek = "deepseek" in MODEL_NAME.lower()
             is_vision = "vision" in MODEL_NAME.lower()
 
-            # แยกร่างคำสั่งให้ต่างกันแบบสุดขั้ว
-            if "อธิบายละเอียด" in response_style:
-                sys_prompt = """คุณคืออาจารย์คณิตศาสตร์ระดับมหาวิทยาลัย (โหมดอธิบายละเอียด)
-                กฎเหล็ก (ต้องทำตามอย่างเคร่งครัด):
-                1. อธิบายเหมือนสอนนักเรียนที่พื้นฐานอ่อน ต้องบอกเหตุผลเสมอว่า 'ทำไมถึงใช้สูตรนี้' หรือ 'ตัวแปรนี้มาจากไหน'
-                2. แบ่งโครงสร้างชัดเจน: **1. วิเคราะห์โจทย์**, **2. แสดงวิธีทำ**, **3. สรุปคำตอบ**
-                3. ห้ามแปล Integral ว่า "ค่าอนันต์" (ให้ใช้คำว่า อินทิเกรต หรือ หาปริพันธ์)
-                4. บังคับใช้ LaTeX ครอบสมการทุกครั้ง ($...$ สำหรับในบรรทัด, $$...$$ สำหรับแยกบรรทัด)
-                5. ตอบเฉพาะข้อที่ผู้ใช้สั่ง ห้ามทำข้ออื่นแถม"""
+            # System Prompt
+            if "Socratic" in tutor_mode:
+                base_sys_prompt = """คุณคือติวเตอร์คณิตศาสตร์ส่วนตัว (โหมดฝึกทีละขั้น)
+กฎเหล็ก:
+1. ห้ามเฉลยรวดเดียวตั้งแต่ต้น
+2. ให้ถามคำถามชี้นำทีละขั้น และเว้นจังหวะให้ผู้เรียนลองคิด
+3. ให้ feedback สั้น กระชับ ชี้จุดผิดแบบเฉพาะจุด
+4. ถ้าผู้เรียนพิมพ์ว่า 'เฉลยเต็ม' ค่อยแสดงวิธีทำครบทุกขั้น
+5. ทุกสมการต้องอยู่ในรูป LaTeX"""
+            elif "อธิบายละเอียด" in response_style:
+                base_sys_prompt = """คุณคืออาจารย์คณิตศาสตร์ระดับมหาวิทยาลัย (โหมดอธิบายละเอียด)
+กฎเหล็ก:
+1. อธิบายเหมือนสอนนักเรียนที่พื้นฐานอ่อน บอกเหตุผลเสมอว่า 'ทำไมถึงใช้สูตรนี้'
+2. แบ่งโครงสร้างชัดเจน: **1. วิเคราะห์โจทย์** → **2. แสดงวิธีทำ** → **3. สรุปคำตอบ**
+3. ใช้คำว่า อินทิเกรต หรือ หาปริพันธ์ (ไม่ใช่ 'ค่าอนันต์')
+4. บังคับใช้ LaTeX ครอบสมการทุกครั้ง ($...$ สำหรับในบรรทัด, $$...$$ สำหรับแยกบรรทัด)
+5. ตอบเฉพาะข้อที่ผู้ใช้สั่ง"""
             else:
-                sys_prompt = """คุณคือเครื่องคิดเลขคณิตศาสตร์ (โหมดสมการเพียว ไร้คำบรรยาย)
-                กฎเหล็ก (ต้องทำตามอย่างเคร่งครัด):
-                1. ห้ามเขียนคำบรรยายภาษาไทย ห้ามมีหัวข้อ ห้ามมีคำอธิบายทฤษฎีใดๆ ทั้งสิ้น (ยกเว้นคำว่า "คำตอบสุดท้าย:")
-                2. ให้แสดงเฉพาะบรรทัดสมการทางคณิตศาสตร์เรียงต่อกันลงมาเรื่อยๆ จนจบ
-                3. บังคับใช้ LaTeX แบบจัดเรียงสมการ (Aligned) โดยครอบด้วย $$ เสมอ เช่น:
-                $$ \begin{aligned} \int x \cos(4x) dx &= ... \\ &= ... \\ &= ... \end{aligned} $$
-                4. บรรทัดล่างสุดให้พิมพ์แค่ **คำตอบสุดท้าย:** ตามด้วยสมการ
-                5. ตอบเฉพาะข้อที่ผู้ใช้สั่ง ห้ามทำข้ออื่นแถม"""
+                base_sys_prompt = """คุณคือเครื่องคิดเลขคณิตศาสตร์ (โหมดเฉลยอย่างเดียว)
+กฎเหล็ก:
+1. ห้ามเขียนคำบรรยายภาษาไทย ห้ามมีคำอธิบายทฤษฎีใดๆ (ยกเว้น 'คำตอบสุดท้าย:')
+2. แสดงเฉพาะบรรทัดสมการเรียงลงมาจนจบ
+3. ใช้ LaTeX แบบ Aligned: $$ \\begin{aligned} ... \\end{aligned} $$
+4. บรรทัดล่างสุดพิมพ์ **คำตอบสุดท้าย:** ตามด้วยสมการ
+5. ตอบเฉพาะข้อที่ผู้ใช้สั่ง"""
+
+            socratic_rules = """
+กฎสำหรับโหมดฝึกทีละขั้น (Socratic):
+1. ห้ามเฉลยรวดเดียวตั้งแต่ต้น
+2. ให้ถามคำถามชี้นำทีละขั้น แล้วรอผู้เรียนตอบ
+3. ตรวจคำตอบผู้เรียนอย่างสุภาพและชี้จุดผิดแบบเฉพาะจุด
+4. เฉลยเต็มรูปแบบได้เมื่อผู้เรียนพิมพ์ว่า 'เฉลยเต็ม' เท่านั้น
+""" if "Socratic" in tutor_mode else ""
+
+            profile_prompt = build_profile_prompt(learner_level, explain_speed, language_pref, tutor_mode)
+            sys_prompt = f"{base_sys_prompt}\n\n{profile_prompt}\n\n{socratic_rules}".strip()
 
             messages_for_ai = []
-            
-            # กฎข้อ 1: ถ้าไม่ใช่ DeepSeek ถึงจะอนุญาตให้ส่ง System Prompt ได้
+
             if not is_deepseek:
                 messages_for_ai.append({'role': 'system', 'content': sys_prompt})
 
-            # นำประวัติแชทมาเรียบเรียงใหม่
             for i, m in enumerate(st.session_state.messages):
                 role = m['role']
                 content_text = str(m['content'])
-                
-                # กฎข้อ 2: ถ้าเป็น DeepSeek ให้แอบยัดคำสั่ง System ไว้ในข้อความแรกของผู้ใช้แทน
+
                 if is_deepseek and i == 0 and role == 'user':
                     content_text = f"[คำสั่งระบบ: {sys_prompt}]\n\n" + content_text
 
-                # กฎข้อ 3: จัดการไฟล์และรูปภาพ เฉพาะกับคำถาม "ข้อล่าสุด" เท่านั้น
                 if i == len(st.session_state.messages) - 1 and role == 'user':
-                    if file_content:
-                        content_text += f"\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n{file_content}"
-                    
+                    if custom_focus_question.strip():
+                        content_text += f"\n\n[จุดที่ผู้ใช้ระบุว่าสงสัย]:\n{custom_focus_question.strip()}"
+
+                    if reference_blocks:
+                        focused_ref = "\n\n".join(reference_blocks[:8])
+                        content_text += f"\n\n[ข้อมูลอ้างอิงเฉพาะส่วนที่ผู้ใช้เลือก]:\n{focused_ref}"
+                    elif file_content:
+                        content_text += f"\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n{file_content[:4000]}"
+
+                    if image_focus_hint.strip():
+                        content_text += f"\n\n[ตำแหน่งที่ผู้ใช้ให้โฟกัสในรูป]: {image_focus_hint.strip()}"
+
                     if base64_image:
                         if is_vision:
-                            # กฎข้อ 4: รูปแบบ JSON พิเศษสำหรับโมเดล Vision โดยเฉพาะ
                             payload = [
                                 {"type": "text", "text": content_text},
                                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                             ]
                             messages_for_ai.append({'role': role, 'content': payload})
-                            continue # ข้ามการ append แบบ text ปกติไปเลย
+                            continue
                         else:
-                            content_text += "\n\n(ผู้ใช้แนบรูปมาด้วย แต่โมเดลนี้ไม่รองรับการดูรูปภาพ ให้คุณตอบจากข้อความโจทย์เป็นหลัก)"
+                            content_text += "\n\n(ผู้ใช้แนบรูปมาด้วย แต่โมเดลนี้ไม่รองรับการดูรูปภาพ)"
 
                 messages_for_ai.append({'role': role, 'content': content_text})
 
+            # Streaming
             full_response = ""
             is_thinking = False
             answer_placeholder = st.empty()
             start_time = time.time()
 
-            # ส่งยิงขึ้น Cloud
-            stream = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=messages_for_ai,
-                stream=True
-            )
+            with st.spinner(""):
+                stream = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=messages_for_ai,
+                    stream=True
+                )
+
+            status_container = None
 
             for chunk in stream:
                 txt = chunk.choices[0].delta.content or ""
@@ -218,38 +764,56 @@ if prompt := st.chat_input("พิมพ์โจทย์ หรือสั่
                 if "<think>" in full_response and "</think>" not in full_response:
                     if not is_thinking:
                         is_thinking = True
-                        status_container = st.status("🧠 AI กำลังคำนวณบนคลาวด์...", expanded=True)
-                        think_text_placeholder = status_container.empty()
-                    think_text_placeholder.markdown(full_response.split("<think>")[-1] + " ▌")
+                        status_container = st.status("🧠 AI กำลังคิดวิเคราะห์...", expanded=True)
+                        think_placeholder = status_container.empty()
+                    think_text = full_response.split("<think>")[-1]
+                    think_placeholder.markdown(
+                        f'<div style="font-size:0.82rem; color:#94a3b8; line-height:1.8;">{think_text} ▌</div>',
+                        unsafe_allow_html=True
+                    )
                 elif "</think>" in full_response:
                     if is_thinking:
                         is_thinking = False
-                        status_container.update(label="💡 คิดเสร็จแล้ว", state="complete", expanded=False)
-                    answer_placeholder.markdown(fix_latex(full_response.split("</think>")[-1]) + " ▌")
+                        if status_container:
+                            status_container.update(label="✅ คิดเสร็จแล้ว", state="complete", expanded=False)
+                    answer_placeholder.markdown(
+                        fix_latex(full_response.split("</think>")[-1]) + " ▌"
+                    )
                 else:
                     answer_placeholder.markdown(fix_latex(full_response) + " ▌")
 
+            # Final display
             final_answer = full_response.split("</think>")[-1] if "</think>" in full_response else full_response
             answer_placeholder.markdown(fix_latex(final_answer).strip())
 
-            # วาดกราฟอัตโนมัติ
+            # Auto-plot graph
             plot_fig = None
             code_match = re.search(r'```python\n(.*?)```', full_response, re.DOTALL)
             if code_match:
                 try:
                     code = code_match.group(1)
-                    fig, ax = plt.subplots()
+                    fig, ax = plt.subplots(facecolor='none')
+                    ax.set_facecolor('#0d1117')
+                    ax.tick_params(colors='#94a3b8')
+                    ax.spines['bottom'].set_color('#334155')
+                    ax.spines['left'].set_color('#334155')
+                    ax.spines['top'].set_color('#334155')
+                    ax.spines['right'].set_color('#334155')
                     exec(f"import numpy as np\n{code}", {"plt": plt, "np": np, "ax": ax}, {})
                     st.pyplot(fig)
                     plot_fig = fig
-                except: pass
+                except:
+                    pass
 
-            st.caption(f"⚡️ ความเร็วคลาวด์: {time.time() - start_time:.2f} วินาที")
+            elapsed = time.time() - start_time
+            st.caption(f"⚡️ ตอบใน {elapsed:.2f} วินาที  •  โมเดล: {model_short}")
 
+            # บันทึก Response
             res_msg = {"role": "assistant", "content": full_response}
-            if plot_fig: res_msg["plot"] = plot_fig
+            if plot_fig:
+                res_msg["plot"] = plot_fig
             st.session_state.messages.append(res_msg)
 
         except Exception as e:
-            # ดัก Error มาโชว์ให้เห็นชัดๆ เลยว่าพังเพราะอะไร
-            st.error(f"🚨 Cloud Error: {e}")
+            st.error(f"🚨 เกิดข้อผิดพลาด: {e}")
+            st.info("💡 ลองตรวจสอบ API Key หรือชื่อโมเดลที่เลือกครับ")
