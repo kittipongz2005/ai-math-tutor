@@ -795,6 +795,21 @@ for msg_idx, message in enumerate(st.session_state.messages):
         if "plot" in message:
             st.pyplot(message["plot"])
 
+        # ── Persistent continue button on latest assistant message (Socratic only)
+        if (
+            message["role"] == "assistant"
+            and "Socratic" in tutor_mode
+            and msg_idx == len(st.session_state.messages) - 1
+        ):
+            if st.button(
+                "➡️  ไปต่อ — สอนขั้นถัดไป",
+                key=f"soc_cont_hist_{msg_idx}",
+                use_container_width=False,
+            ):
+                st.session_state.pending_prompt = "ไปต่อ"
+                st.session_state.socratic_continue = True
+                st.rerun()
+
 # ─────────────────────────────────────────────
 #  Chat Input
 # ─────────────────────────────────────────────
