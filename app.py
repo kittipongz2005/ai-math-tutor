@@ -617,8 +617,14 @@ def beautify_answer_text(text: str, decorate_final: bool = True) -> str:
         return t
     body = t[:m.start()].strip()
     final_expr = m.group(2).strip()
+    if final_expr:
+        final_expr = final_expr.replace("\\\\", "\\")
+        final_expr = re.sub(r'^\$\$\s*', '', final_expr)
+        final_expr = re.sub(r'\s*\$\$$', '', final_expr)
+        final_expr = final_expr.strip()
+
     if final_expr and "$" not in final_expr:
-        final_expr = f"${final_expr}$"
+        final_expr = f"$$ {final_expr} $$"
     pretty = (
         '<div class="final-answer"><strong>✅ คำตอบสุดท้าย</strong><br>'
         f'{final_expr}</div>'
@@ -1066,77 +1072,123 @@ with st.sidebar:
             st.image(uploaded_img, caption="📸 รูปที่อัปโหลด", use_container_width=True)
             st.success("✅ โหลดรูปสำเร็จ")
 
+            if st.button("🔍 วิเคราะห์สูตรจากรูปนี้ (แบบง่าย)", use_container_width=True):
+                if not API_KEY.strip():
+                    st.warning("กรุณาใส่ Groq API Key ก่อน")
+                else:
+                    try:
+                        vision_prompt = (
+                            "อ่านข้อความ/สมการจากรูปนี้ แล้วตอบเป็นภาษาไทยสั้น ๆ ว่า:\n"
+                            "1) สูตรหรือขั้นตอนนี้คืออะไร\n"
+                            "2) มาจากหลักการไหน\n"
+                            "3) ใช้เมื่อไหร่\n"
+                            "4) ข้อผิดพลาดที่พบบ่อย 1 ข้อ"
+                        )
+                        client = Groq(api_key=API_KEY.strip())
+
+                        model_candidates = []
+                        if "vision" in MODEL_NAME.lower():
+                            model_candidates.append(MODEL_NAME)
+                        model_candidates.extend([
+                            "llama-3.2-11b-vision-preview",
+                            "llama-3.2-90b-vision-preview",
+                        ])
+
+                        analysis_text = ""
+                        for model_name in model_candidates:
+                            try:
+                                resp = client.chat.completions.create(
+                                    model=model_name,
+                                    messages=[
+                                        {
+                                            "role": "user",
+                                            "content": [
+                                                {"type": "text", "text": vision_prompt},
+                                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
+                                            ],
+                                        }
+                                    ],
+                                )
+                                analysis_text = (resp.choices[0].message.content or "").strip()
+                                if analysis_text:
+                                    break
+                            except Exception:
+                                continue
+
+                        if analysis_text:
+                            st.session_state.pending_prompt = (
+                                f"ฉันแนบรูปโจทย์นี้มา:\n{analysis_text}\n\n"
+                                "ช่วยอธิบายให้เข้าใจง่ายและเชื่อมกับวิธีทำในข้อสอบ"
+                            )
+                            save_store()
+                            st.rerun()
+                        else:
+                            st.error("ยังวิเคราะห์ภาพไม่ได้ ลองใหม่อีกครั้ง")
+                    except Exception as e:
+                        st.error(f"วิเคราะห์รูปไม่สำเร็จ: {e}")
+
             cropper_fn = get_cropper_func()
             if cropper_fn is not None:
-                st.caption("✂️ ลากครอปเฉพาะสูตร/บรรทัดที่สงสัย แล้วกดวิเคราะห์")
-                cropped_img = cropper_fn(
-                    uploaded_img,
-                    realtime_update=True,
-                    return_type="image",
-                    box_color="#3b82f6",
-                    aspect_ratio=None,
-                    key="formula_cropper",
-                )
-                if cropped_img is not None:
-                    st.image(cropped_img, caption="🧩 ส่วนที่ครอป", use_container_width=True)
+                with st.expander("โหมดขั้นสูง: ครอปเฉพาะส่วน", expanded=False):
+                    st.caption("ลากกรอบเฉพาะสูตรที่สงสัย แล้วกดปุ่มวิเคราะห์")
+                    cropped_img = cropper_fn(
+                        uploaded_img,
+                        realtime_update=True,
+                        return_type="image",
+                        box_color="#3b82f6",
+                        aspect_ratio=None,
+                        key="formula_cropper",
+                    )
+                    if cropped_img is not None:
+                        st.image(cropped_img, caption="🧩 ส่วนที่ครอป", use_container_width=True)
 
-                    if st.button("🔍 อธิบายสูตรจากส่วนที่ครอป", use_container_width=True):
-                        if not API_KEY.strip():
-                            st.warning("กรุณาใส่ Groq API Key ก่อน")
-                        else:
-                            try:
-                                vision_prompt = (
-                                    "อ่านข้อความ/สมการจากภาพที่ครอป แล้วอธิบายสั้น ๆ เป็นภาษาไทยว่า:\n"
-                                    "1) นี่คือสูตร/ขั้นตอนอะไร\n"
-                                    "2) มาจากหลักการไหน\n"
-                                    "3) ใช้เมื่อไหร่\n"
-                                    "ตอบให้กระชับและชัดเจน"
-                                )
-                                crop_b64 = encode_image(cropped_img)
-                                client = Groq(api_key=API_KEY.strip())
-
-                                model_candidates = []
-                                if "vision" in MODEL_NAME.lower():
-                                    model_candidates.append(MODEL_NAME)
-                                model_candidates.extend([
-                                    "llama-3.2-11b-vision-preview",
-                                    "llama-3.2-90b-vision-preview",
-                                ])
-
-                                analysis_text = ""
-                                for model_name in model_candidates:
-                                    try:
-                                        resp = client.chat.completions.create(
-                                            model=model_name,
-                                            messages=[
-                                                {
-                                                    "role": "user",
-                                                    "content": [
-                                                        {"type": "text", "text": vision_prompt},
-                                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{crop_b64}"}},
-                                                    ],
-                                                }
-                                            ],
-                                        )
-                                        analysis_text = (resp.choices[0].message.content or "").strip()
-                                        if analysis_text:
-                                            break
-                                    except Exception:
-                                        continue
-
-                                if analysis_text:
-                                    st.session_state.pending_prompt = (
-                                        f"ฉันครอปส่วนนี้มา:\n{analysis_text}\n\n"
-                                        "ช่วยอธิบายเพิ่มว่ามาจากสูตรไหน และเชื่อมกับขั้นตอนในโจทย์ยังไง"
+                        if st.button("🔍 วิเคราะห์จากส่วนที่ครอป", use_container_width=True):
+                            if not API_KEY.strip():
+                                st.warning("กรุณาใส่ Groq API Key ก่อน")
+                            else:
+                                try:
+                                    vision_prompt = (
+                                        "อ่านข้อความ/สมการจากภาพที่ครอป แล้วตอบสั้น ๆ เป็นภาษาไทยว่า:\n"
+                                        "1) นี่คือสูตรหรือขั้นตอนไหน\n"
+                                        "2) มาจากหลักการไหน\n"
+                                        "3) ต้องระวังอะไร"
                                     )
-                                    save_store()
-                                    st.rerun()
-                                else:
-                                    st.error("ยังวิเคราะห์ภาพครอปไม่ได้ ลองเลือกโมเดลที่รองรับ Vision หรือครอปให้ชัดขึ้น")
-                            except Exception as e:
-                                st.error(f"วิเคราะห์ภาพครอปไม่สำเร็จ: {e}")
+                                    crop_b64 = encode_image(cropped_img)
+                                    client = Groq(api_key=API_KEY.strip())
+                                    analysis_text = ""
+                                    for model_name in [MODEL_NAME, "llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]:
+                                        try:
+                                            resp = client.chat.completions.create(
+                                                model=model_name,
+                                                messages=[
+                                                    {
+                                                        "role": "user",
+                                                        "content": [
+                                                            {"type": "text", "text": vision_prompt},
+                                                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{crop_b64}"}},
+                                                        ],
+                                                    }
+                                                ],
+                                            )
+                                            analysis_text = (resp.choices[0].message.content or "").strip()
+                                            if analysis_text:
+                                                break
+                                        except Exception:
+                                            continue
+
+                                    if analysis_text:
+                                        st.session_state.pending_prompt = (
+                                            f"ฉันครอปส่วนนี้มา:\n{analysis_text}\n\n"
+                                            "ช่วยอธิบายเพิ่มว่ามาจากสูตรไหน และเชื่อมกับขั้นตอนในโจทย์ยังไง"
+                                        )
+                                        save_store()
+                                        st.rerun()
+                                    else:
+                                        st.error("ยังวิเคราะห์ภาพครอปไม่ได้ ลองครอปให้ชัดขึ้น")
+                                except Exception as e:
+                                    st.error(f"วิเคราะห์ภาพครอปไม่สำเร็จ: {e}")
             else:
-                st.info("ติดตั้งแพ็กเกจ streamlit-cropper เพื่อใช้ฟีเจอร์ครอปสูตร")
+                st.caption("หมายเหตุ: โหมดครอปขั้นสูงต้องใช้แพ็กเกจ streamlit-cropper")
         elif ftype == "application/pdf":
             try:
                 reader = PyPDF2.PdfReader(uploaded_file)
