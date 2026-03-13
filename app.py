@@ -167,6 +167,27 @@ h1 {
 p, li, span, label { color: #cbd5e1 !important; }
 strong { color: #e2e8f0 !important; }
 code { color: #4facfe !important; background: rgba(79,172,254,0.1) !important; border-radius: 4px !important; padding: 1px 5px !important; }
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li {
+    line-height: 1.75 !important;
+}
+
+.katex-display {
+    background: rgba(79, 172, 254, 0.06);
+    border: 1px solid rgba(79, 172, 254, 0.22);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 0.65rem 0;
+    overflow-x: auto;
+}
+
+.final-answer {
+    background: rgba(34, 197, 94, 0.08);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-top: 0.75rem;
+}
 
 /* === EXPANDER (Thinking box) === */
 [data-testid="stExpander"] {
@@ -285,6 +306,51 @@ def fix_latex(text):
         t = t.replace(foreign, th)
     return t
 
+def ensure_math_renderable(text):
+    t = str(text).strip()
+    if not t:
+        return t
+
+    if t.lstrip().startswith("&") and "\\end{aligned}" in t and "\\begin{aligned}" not in t:
+        t = "\\begin{aligned}\n" + t
+
+    if "\\begin{aligned}" in t and "\\end{aligned}" not in t:
+        t = t + "\n\\end{aligned}"
+
+    has_aligned = "\\begin{aligned}" in t and "\\end{aligned}" in t
+    if has_aligned and "$$" not in t:
+        t = f"$$\n{t}\n$$"
+
+    has_latex_commands = bool(re.search(r'\\(frac|int|sum|sqrt|cdot|times|left|right|text)', t))
+    if t.lstrip().startswith("&") and "$" not in t:
+        t = f"$$\n\\begin{{aligned}}\n{t}\n\\end{{aligned}}\n$$"
+    elif has_latex_commands and "$" not in t and "\\n" in t:
+        t = f"$$\n{t}\n$$"
+
+    return t
+
+def beautify_answer_text(text):
+    t = fix_latex(text)
+    t = ensure_math_renderable(t)
+
+    final_pattern = re.compile(r'(\*\*คำตอบสุดท้าย:?\*\*|คำตอบสุดท้าย:)\s*(.+)', re.DOTALL)
+    m = final_pattern.search(t)
+    if not m:
+        return t
+
+    body = t[:m.start()].strip()
+    final_expr = m.group(2).strip()
+    if final_expr and "$" not in final_expr:
+        final_expr = f"${final_expr}$"
+
+    pretty_final = (
+        '<div class="final-answer"><strong>✅ คำตอบสุดท้าย</strong><br>'
+        f'{final_expr}'
+        '</div>'
+    )
+
+    return (body + "\n\n" if body else "") + pretty_final
+
 def encode_image(img):
     buffered = io.BytesIO()
     img = img.convert('RGB')
@@ -379,14 +445,14 @@ with st.sidebar:
     )
 
     model_options = [
-        "deepseek-r1-distill-llama-70b",
         "qwen/qwen3-32b",
+        "deepseek-r1-distill-llama-70b",
         "llama-3.3-70b-versatile",
         "llama-3.1-8b-instant",
         "mixtral-8x7b-32768",
     ]
 
-    MODEL_NAME = "deepseek-r1-distill-llama-70b"
+    MODEL_NAME = "qwen/qwen3-32b"
     if quick_mode == "ฝึกทีละขั้น":
         response_style = "📝 สอนและอธิบายละเอียด"
         tutor_mode = "โหมดฝึกทีละขั้น (Socratic)"
@@ -406,7 +472,7 @@ with st.sidebar:
             "🤖 เลือกโมเดล",
             model_options,
             index=0,
-            help="deepseek-r1 แนะนำที่สุดสำหรับคณิตศาสตร์"
+            help="ค่าเริ่มต้นเป็น qwen3-32b"
         )
 
         manual_override = st.checkbox("ปรับค่าการสอนเอง", value=False)
@@ -639,9 +705,9 @@ for msg_idx, message in enumerate(st.session_state.messages):
             with st.expander("💡 กระบวนการคิดของ AI", expanded=False):
                 st.markdown(f'<div style="font-size:0.85rem; color:#94a3b8; line-height:1.7;">{think_text}</div>',
                             unsafe_allow_html=True)
-            st.markdown(fix_latex(answer_text))
+            st.markdown(beautify_answer_text(answer_text), unsafe_allow_html=True)
         else:
-            st.markdown(fix_latex(str(content)))
+            st.markdown(beautify_answer_text(str(content)), unsafe_allow_html=True)
 
         if message["role"] == "assistant":
             final_msg_text = str(content).split("</think>")[-1].strip()
@@ -808,14 +874,15 @@ if prompt:
                         if status_container:
                             status_container.update(label="✅ คิดเสร็จแล้ว", state="complete", expanded=False)
                     answer_placeholder.markdown(
-                        fix_latex(full_response.split("</think>")[-1]) + " ▌"
+                        beautify_answer_text(full_response.split("</think>")[-1]) + " ▌",
+                        unsafe_allow_html=True
                     )
                 else:
-                    answer_placeholder.markdown(fix_latex(full_response) + " ▌")
+                    answer_placeholder.markdown(beautify_answer_text(full_response) + " ▌", unsafe_allow_html=True)
 
             # Final display
             final_answer = full_response.split("</think>")[-1] if "</think>" in full_response else full_response
-            answer_placeholder.markdown(fix_latex(final_answer).strip())
+            answer_placeholder.markdown(beautify_answer_text(final_answer).strip(), unsafe_allow_html=True)
 
             # Auto-plot graph
             plot_fig = None
