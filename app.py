@@ -2,11 +2,14 @@ import streamlit as st
 import PyPDF2
 import time
 import io
+import os
 import re
 import base64
 import copy
+import textwrap
 import json
 import importlib
+import contextlib
 from datetime import datetime
 from pathlib import Path
 from PIL import Image
@@ -545,6 +548,9 @@ for key, val in {
     "pending_quick_mode_restore": "",
     "pending_last_mode_restore": "",
     "storage_loaded": False,
+    "edit_message_index": -1,
+    "edit_message_text": "",
+    "enable_python_calc": True,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -625,9 +631,10 @@ def beautify_answer_text(text: str, decorate_final: bool = True) -> str:
 
     if final_expr and "$" not in final_expr:
         final_expr = f"$$ {final_expr} $$"
+    # NOTE: Keep LaTeX outside HTML block so Streamlit/Katex can render math correctly.
     pretty = (
-        '<div class="final-answer"><strong>✅ คำตอบสุดท้าย</strong><br>'
-        f'{final_expr}</div>'
+        '<div class="final-answer"><strong>✅ คำตอบสุดท้าย</strong></div>\n\n'
+        f'{final_expr}'
     )
     return (body + "\n\n" if body else "") + pretty
 
@@ -722,6 +729,123 @@ def build_profile_prompt(level, speed, lang, mode) -> str:
         f"ผู้เรียน: ระดับ {level} | ความเร็ว: {speed} | ภาษา: {lang} | โหมด: {mode}\n"
         "ปรับเนื้อหาให้เหมาะกับระดับผู้เรียน และปรับความยาวคำอธิบายตามความเร็วที่เลือก"
     )
+
+
+def build_chat_export_text(messages: list) -> str:
+    lines = []
+    for msg in messages:
+        role = "ผู้ใช้" if msg.get("role") == "user" else "AI"
+        content = strip_internal_tags(str(msg.get("content", ""))).strip()
+        lines.append(f"[{role}]\n{content}\n")
+    return "\n".join(lines).strip()
+
+
+def build_chat_export_markdown(messages: list) -> str:
+    parts = ["# Math AI Tutor Chat Export", ""]
+    for idx, msg in enumerate(messages, 1):
+        role = "🧑 ผู้ใช้" if msg.get("role") == "user" else "🤖 AI"
+        content = strip_internal_tags(str(msg.get("content", ""))).strip()
+        parts.append(f"## {idx}. {role}")
+        parts.append("")
+        parts.append(content)
+        parts.append("")
+    return "\n".join(parts).strip()
+
+
+def build_chat_export_pdf_bytes(messages: list) -> tuple[bytes | None, str | None]:
+    try:
+        pagesizes_module = importlib.import_module("reportlab.lib.pagesizes")
+        pdfgen_canvas_module = importlib.import_module("reportlab.pdfgen.canvas")
+        pdfmetrics_module = importlib.import_module("reportlab.pdfbase.pdfmetrics")
+        ttfonts_module = importlib.import_module("reportlab.pdfbase.ttfonts")
+    except Exception:
+        return None, "ยังไม่พบแพ็กเกจ reportlab (ติดตั้งด้วย pip install reportlab)"
+
+    A4 = getattr(pagesizes_module, "A4")
+    Canvas = getattr(pdfgen_canvas_module, "Canvas")
+    register_font = getattr(pdfmetrics_module, "registerFont")
+    TTFont = getattr(ttfonts_module, "TTFont")
+
+    buffer = io.BytesIO()
+    pdf = Canvas(buffer, pagesize=A4)
+    page_width, page_height = A4
+
+    font_name = "Helvetica"
+    thai_font_candidates = [
+        r"C:\Windows\Fonts\tahoma.ttf",
+        r"C:\Windows\Fonts\LeelawUI.ttf",
+        r"C:\Windows\Fonts\THSarabunNew.ttf",
+    ]
+    for font_path in thai_font_candidates:
+        if os.path.exists(font_path):
+            try:
+                register_font(TTFont("TutorThai", font_path))
+                font_name = "TutorThai"
+                break
+            except Exception:
+                continue
+
+    margin_x = 42
+    y = page_height - 48
+    line_height = 15
+
+    def new_page():
+        nonlocal y
+        pdf.showPage()
+        pdf.setFont(font_name, 11)
+        y = page_height - 48
+
+    pdf.setTitle("Math AI Tutor Chat Export")
+    pdf.setFont(font_name, 14)
+    pdf.drawString(margin_x, y, "Math AI Tutor Chat Export")
+    y -= 22
+    pdf.setFont(font_name, 11)
+    pdf.drawString(margin_x, y, datetime.now().strftime("Exported: %Y-%m-%d %H:%M:%S"))
+    y -= 24
+
+    wrap_width = 95 if font_name == "TutorThai" else 105
+
+    for idx, msg in enumerate(messages, 1):
+        role = "ผู้ใช้" if msg.get("role") == "user" else "AI"
+        content = strip_internal_tags(str(msg.get("content", ""))).strip() or "(ว่าง)"
+        header = f"{idx}. {role}"
+
+        if y < 80:
+            new_page()
+
+        pdf.setFont(font_name, 11)
+        pdf.drawString(margin_x, y, header)
+        y -= line_height
+
+        for raw_line in content.splitlines() or [""]:
+            chunks = textwrap.wrap(raw_line, width=wrap_width, replace_whitespace=False) or [""]
+            for chunk in chunks:
+                if y < 55:
+                    new_page()
+                pdf.drawString(margin_x + 10, y, chunk)
+                y -= line_height
+
+        y -= 6
+
+    pdf.save()
+    buffer.seek(0)
+    return buffer.getvalue(), None
+
+
+def run_python_code_capture(code: str) -> tuple[bool, str]:
+    out = io.StringIO()
+    local_ns = {}
+    try:
+        with contextlib.redirect_stdout(out):
+            exec(code, {"np": np, "math": __import__("math")}, local_ns)
+        printed = out.getvalue().strip()
+        if printed:
+            return True, printed
+        if "result" in local_ns:
+            return True, str(local_ns["result"])
+        return True, "(รันโค้ดสำเร็จ แต่ไม่มี output; แนะนำให้ print(result))"
+    except Exception as e:
+        return False, str(e)
 
 
 def now_iso() -> str:
@@ -1002,6 +1126,12 @@ with st.sidebar:
                 ["ไทย", "ไทย+อังกฤษศัพท์สำคัญ", "English"],
             )
 
+        st.session_state.enable_python_calc = st.checkbox(
+            "คำนวณแม่นยำด้วย Python (Beta)",
+            value=st.session_state.enable_python_calc,
+            help="ถ้า AI ส่งโค้ด Python สำหรับคำนวณ ระบบจะรันและแสดงผลลัพธ์จริง",
+        )
+
     model_short = MODEL_NAME.split("/")[-1].split("-distill")[0]
     st.markdown(
         f'<div class="header-meta" style="margin:4px 0 8px;">'
@@ -1009,6 +1139,45 @@ with st.sidebar:
         f'<span class="model-chip">✦ {model_short}</span></div>',
         unsafe_allow_html=True,
     )
+
+    st.divider()
+
+    # ── Export current chat
+    st.markdown('<div class="section-label">⬇️ ส่งออกแชทปัจจุบัน</div>', unsafe_allow_html=True)
+    if st.session_state.messages:
+        export_txt = build_chat_export_text(st.session_state.messages)
+        export_md = build_chat_export_markdown(st.session_state.messages)
+        export_pdf, export_pdf_error = build_chat_export_pdf_bytes(st.session_state.messages)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        cexp1, cexp2, cexp3 = st.columns(3)
+        cexp1.download_button(
+            "TXT",
+            data=export_txt,
+            file_name=f"math_tutor_chat_{stamp}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+        cexp2.download_button(
+            "Markdown",
+            data=export_md,
+            file_name=f"math_tutor_chat_{stamp}.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+        if export_pdf is not None:
+            cexp3.download_button(
+                "PDF",
+                data=export_pdf,
+                file_name=f"math_tutor_chat_{stamp}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        else:
+            cexp3.button("PDF", disabled=True, use_container_width=True)
+            if export_pdf_error:
+                st.caption(f"หมายเหตุ PDF: {export_pdf_error}")
+    else:
+        st.caption("ยังไม่มีข้อความสำหรับส่งออก")
 
     st.divider()
 
@@ -1281,6 +1450,18 @@ for msg_idx, message in enumerate(st.session_state.messages):
         if "plot" in message:
             st.pyplot(message["plot"])
 
+        if message.get("python_result"):
+            st.markdown(
+                f'<div class="final-answer"><strong>🧮 ผลคำนวณจาก Python</strong><br>{message.get("python_result")}</div>',
+                unsafe_allow_html=True,
+            )
+
+        if message["role"] == "user":
+            if st.button("✏️ แก้ข้อความนี้", key=f"edit_msg_{msg_idx}", use_container_width=False):
+                st.session_state.edit_message_index = msg_idx
+                st.session_state.edit_message_text = str(message.get("content", ""))
+                st.rerun()
+
         # ── Persistent continue button on latest assistant message (Socratic only)
         if (
             message["role"] == "assistant"
@@ -1300,6 +1481,37 @@ for msg_idx, message in enumerate(st.session_state.messages):
 # ─────────────────────────────────────────────
 #  Chat Input
 # ─────────────────────────────────────────────
+if not (0 <= st.session_state.edit_message_index < len(st.session_state.messages)):
+    st.session_state.edit_message_index = -1
+
+if st.session_state.edit_message_index >= 0:
+    st.markdown("### ✏️ แก้โจทย์ที่ส่งไปแล้ว")
+    st.caption("บันทึกแล้วระบบจะลบข้อความถัดจากจุดนั้น และสร้างคำตอบใหม่จากข้อความที่แก้")
+    st.text_area(
+        "แก้ข้อความ",
+        key="edit_message_text",
+        height=100,
+        label_visibility="collapsed",
+    )
+    ce1, ce2 = st.columns(2)
+    if ce1.button("บันทึกและสร้างคำตอบใหม่", use_container_width=True):
+        edited = st.session_state.edit_message_text.strip()
+        if not edited:
+            st.warning("ข้อความแก้ไขว่างไม่ได้")
+        else:
+            cut_idx = st.session_state.edit_message_index
+            st.session_state.messages = st.session_state.messages[:cut_idx]
+            st.session_state.pending_prompt = edited
+            st.session_state.edit_message_index = -1
+            st.session_state.edit_message_text = ""
+            st.session_state.current_chat_dirty = True
+            save_store()
+            st.rerun()
+    if ce2.button("ยกเลิกการแก้ไข", use_container_width=True):
+        st.session_state.edit_message_index = -1
+        st.session_state.edit_message_text = ""
+        st.rerun()
+
 typed_prompt  = st.chat_input("✏️  พิมพ์โจทย์หรือคำถามคณิตศาสตร์…")
 queued_prompt = st.session_state.pending_prompt.strip()
 prompt        = typed_prompt if typed_prompt else (queued_prompt if queued_prompt else "")
@@ -1397,7 +1609,14 @@ if prompt:
         should_force_overview = False
 
     profile   = build_profile_prompt(learner_level, explain_speed, language_pref, tutor_mode)
-    sys_prompt = f"{base_sys}\n\n{profile}"
+    calc_instruction = ""
+    if st.session_state.enable_python_calc:
+        calc_instruction = (
+            "\n\nกฎคำนวณแม่นยำ:\n"
+            "- ถ้าต้องคำนวณตัวเลขที่ซับซ้อน ให้แนบโค้ด ```python``` ที่รันได้\n"
+            "- ให้กำหนด result และ print(result)"
+        )
+    sys_prompt = f"{base_sys}\n\n{profile}{calc_instruction}"
 
     is_deepseek = "deepseek" in MODEL_NAME.lower()
     is_vision   = "vision"   in MODEL_NAME.lower()
@@ -1520,23 +1739,36 @@ if prompt:
 
             # ── Auto-plot graph if code block exists
             plot_fig = None
+            python_result = None
             code_m   = re.search(r'```python\n(.*?)```', full_response, re.DOTALL)
             if code_m:
-                try:
-                    fig, ax = plt.subplots(facecolor='none')
-                    ax.set_facecolor('#0d1117')
-                    for spine in ax.spines.values():
-                        spine.set_color('#334155')
-                    ax.tick_params(colors='#94a3b8')
-                    exec(
-                        f"import numpy as np\n{code_m.group(1)}",
-                        {"plt": plt, "np": np, "ax": ax},
-                        {},
-                    )
-                    st.pyplot(fig)
-                    plot_fig = fig
-                except:
-                    pass
+                code_text = code_m.group(1)
+                if "plt" in code_text or "ax" in code_text:
+                    try:
+                        fig, ax = plt.subplots(facecolor='none')
+                        ax.set_facecolor('#0d1117')
+                        for spine in ax.spines.values():
+                            spine.set_color('#334155')
+                        ax.tick_params(colors='#94a3b8')
+                        exec(
+                            f"import numpy as np\n{code_text}",
+                            {"plt": plt, "np": np, "ax": ax},
+                            {},
+                        )
+                        st.pyplot(fig)
+                        plot_fig = fig
+                    except:
+                        pass
+                elif st.session_state.enable_python_calc:
+                    ok, py_out = run_python_code_capture(code_text)
+                    if ok:
+                        python_result = py_out
+                        st.markdown(
+                            f'<div class="final-answer"><strong>🧮 ผลคำนวณจาก Python</strong><br>{py_out}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.caption(f"Python execution error: {py_out}")
 
             elapsed = time.time() - start_time
             st.caption(f"⚡ {elapsed:.2f}s  ·  {model_short}  ·  {'Socratic' if 'Socratic' in tutor_mode else response_style.split()[0]}")
@@ -1550,6 +1782,8 @@ if prompt:
             }
             if plot_fig:
                 res_msg["plot"] = plot_fig
+            if python_result:
+                res_msg["python_result"] = python_result
             st.session_state.messages.append(res_msg)
             st.session_state.current_chat_dirty = True
             save_store()

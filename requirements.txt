@@ -6,3 +6,4 @@ numpy
 groq
 supabase
 streamlit-cropper
+reportlab
