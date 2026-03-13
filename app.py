@@ -679,6 +679,14 @@ def strip_internal_tags(text: str) -> str:
     return t.strip()
 
 
+def clean_content_for_export(text: str) -> str:
+    t = strip_internal_tags(text)
+    t = re.sub(r'<think>.*?</think>', '', t, flags=re.IGNORECASE | re.DOTALL)
+    t = re.sub(r'<think>.*$', '', t, flags=re.IGNORECASE | re.DOTALL)
+    t = t.replace('<think>', '').replace('</think>', '')
+    return t.strip()
+
+
 def is_socratic_done(text: str, force_done: bool = False) -> bool:
     if force_done:
         return True
@@ -735,7 +743,7 @@ def build_chat_export_text(messages: list) -> str:
     lines = []
     for msg in messages:
         role = "ผู้ใช้" if msg.get("role") == "user" else "AI"
-        content = strip_internal_tags(str(msg.get("content", ""))).strip()
+        content = clean_content_for_export(str(msg.get("content", ""))).strip()
         lines.append(f"[{role}]\n{content}\n")
     return "\n".join(lines).strip()
 
@@ -744,7 +752,7 @@ def build_chat_export_markdown(messages: list) -> str:
     parts = ["# Math AI Tutor Chat Export", ""]
     for idx, msg in enumerate(messages, 1):
         role = "🧑 ผู้ใช้" if msg.get("role") == "user" else "🤖 AI"
-        content = strip_internal_tags(str(msg.get("content", ""))).strip()
+        content = clean_content_for_export(str(msg.get("content", ""))).strip()
         parts.append(f"## {idx}. {role}")
         parts.append("")
         parts.append(content)
@@ -807,7 +815,7 @@ def build_chat_export_pdf_bytes(messages: list) -> tuple[bytes | None, str | Non
 
     for idx, msg in enumerate(messages, 1):
         role = "ผู้ใช้" if msg.get("role") == "user" else "AI"
-        content = strip_internal_tags(str(msg.get("content", ""))).strip() or "(ว่าง)"
+        content = clean_content_for_export(str(msg.get("content", ""))).strip() or "(ว่าง)"
         header = f"{idx}. {role}"
 
         if y < 80:
