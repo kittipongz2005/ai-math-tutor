@@ -371,48 +371,75 @@ with st.sidebar:
         help="รับฟรีที่ console.groq.com"
     )
 
-    MODEL_NAME = st.selectbox(
-        "🤖 เลือกโมเดล",
-        [
-            "deepseek-r1-distill-llama-70b",
-            "qwen/qwen3-32b",
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "mixtral-8x7b-32768",
-        ],
-        help="deepseek-r1 แนะนำที่สุดสำหรับคณิตศาสตร์"
+    quick_mode = st.radio(
+        "🚀 โหมดใช้งานเร็ว",
+        ["ติวละเอียด", "ฝึกทีละขั้น", "เฉลยไว"],
+        horizontal=True,
+        help="เลือกแบบเร็ว ๆ ได้เลย ถ้าต้องการปรับเองค่อยเปิดตั้งค่าเพิ่มเติม"
     )
 
-    # Model badge
+    model_options = [
+        "deepseek-r1-distill-llama-70b",
+        "qwen/qwen3-32b",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768",
+    ]
+
+    MODEL_NAME = "deepseek-r1-distill-llama-70b"
+    if quick_mode == "ฝึกทีละขั้น":
+        response_style = "📝 สอนและอธิบายละเอียด"
+        tutor_mode = "โหมดฝึกทีละขั้น (Socratic)"
+    elif quick_mode == "เฉลยไว":
+        response_style = "⚡️ เฉลยอย่างเดียว"
+        tutor_mode = "โหมดปกติ"
+    else:
+        response_style = "📝 สอนและอธิบายละเอียด"
+        tutor_mode = "โหมดปกติ"
+
+    learner_level = "ม.ปลาย"
+    explain_speed = "พอดี"
+    language_pref = "ไทย"
+
+    with st.expander("⚙️ ตั้งค่าเพิ่มเติม (ไม่จำเป็น)", expanded=False):
+        MODEL_NAME = st.selectbox(
+            "🤖 เลือกโมเดล",
+            model_options,
+            index=0,
+            help="deepseek-r1 แนะนำที่สุดสำหรับคณิตศาสตร์"
+        )
+
+        manual_override = st.checkbox("ปรับค่าการสอนเอง", value=False)
+        if manual_override:
+            response_style = st.selectbox(
+                "📐 รูปแบบการตอบ",
+                ["📝 สอนและอธิบายละเอียด", "⚡️ เฉลยอย่างเดียว"],
+                key="style_memory"
+            )
+
+            tutor_mode = st.selectbox(
+                "🎯 โหมดติวเตอร์",
+                ["โหมดปกติ", "โหมดฝึกทีละขั้น (Socratic)"],
+                help="โหมดฝึกจะไม่เฉลยรวดเดียว แต่จะพาคิดทีละขั้นเหมือนติวเตอร์ส่วนตัว"
+            )
+
+            learner_level = st.selectbox(
+                "🧑‍🎓 ระดับผู้เรียน",
+                ["ม.ต้น", "ม.ปลาย", "มหาวิทยาลัยปีต้น", "มหาวิทยาลัยปีสูง"]
+            )
+
+            explain_speed = st.selectbox(
+                "⏱️ ความเร็วการอธิบาย",
+                ["ช้าและละเอียด", "พอดี", "กระชับเร็ว"]
+            )
+
+            language_pref = st.selectbox(
+                "🌐 ภาษาในการตอบ",
+                ["ไทย", "ไทย+อังกฤษศัพท์สำคัญ", "English"]
+            )
+
     model_short = MODEL_NAME.split("/")[-1].split("-distill")[0]
-    st.markdown(f'<span class="model-badge">✨ {model_short}</span>', unsafe_allow_html=True)
-
-    response_style = st.selectbox(
-        "📐 รูปแบบการตอบ",
-        ["📝 สอนและอธิบายละเอียด", "⚡️ เฉลยอย่างเดียว"],
-        key="style_memory"
-    )
-
-    tutor_mode = st.selectbox(
-        "🎯 โหมดติวเตอร์",
-        ["โหมดปกติ", "โหมดฝึกทีละขั้น (Socratic)"],
-        help="โหมดฝึกจะไม่เฉลยรวดเดียว แต่จะพาคิดทีละขั้นเหมือนติวเตอร์ส่วนตัว"
-    )
-
-    learner_level = st.selectbox(
-        "🧑‍🎓 ระดับผู้เรียน",
-        ["ม.ต้น", "ม.ปลาย", "มหาวิทยาลัยปีต้น", "มหาวิทยาลัยปีสูง"]
-    )
-
-    explain_speed = st.selectbox(
-        "⏱️ ความเร็วการอธิบาย",
-        ["ช้าและละเอียด", "พอดี", "กระชับเร็ว"]
-    )
-
-    language_pref = st.selectbox(
-        "🌐 ภาษาในการตอบ",
-        ["ไทย", "ไทย+อังกฤษศัพท์สำคัญ", "English"]
-    )
+    st.caption(f"✨ โมเดล: {model_short}")
 
     st.divider()
 
@@ -430,6 +457,7 @@ with st.sidebar:
     base64_image = None
     image_focus_hint = ""
     sidebar_is_vision = "vision" in MODEL_NAME.lower()
+    enable_focus_mode = st.toggle("🎯 โหมดเลือกจุดที่สงสัย", value=False, help="เปิดเมื่ออยากเลือกเฉพาะหน้า/ช่วงข้อความ")
 
     if uploaded_file:
         file_fingerprint = f"{uploaded_file.name}:{uploaded_file.size}"
@@ -447,38 +475,39 @@ with st.sidebar:
             st.image(uploaded_img, caption="📸 รูปภาพที่อัปโหลด", use_container_width=True)
             st.success("✅ โหลดรูปสำเร็จ")
 
-            image_focus_hint = st.text_input(
-                "🎯 จุดที่สงสัยในรูป (เช่น มุมขวาบน, บรรทัดที่ 3)",
-                placeholder="พิมพ์ตำแหน่งหรือเนื้อหาที่อยากให้โฟกัส"
-            )
+            if enable_focus_mode:
+                image_focus_hint = st.text_input(
+                    "🎯 จุดที่สงสัยในรูป (เช่น มุมขวาบน, บรรทัดที่ 3)",
+                    placeholder="พิมพ์ตำแหน่งหรือเนื้อหาที่อยากให้โฟกัส"
+                )
 
-            if sidebar_is_vision:
-                if st.button("🔎 ดึงข้อความจากรูป (OCR AI)", use_container_width=True):
-                    if not API_KEY.strip():
-                        st.warning("กรุณาใส่ API Key ก่อนดึงข้อความจากรูป")
-                    else:
-                        try:
-                            ocr_client = Groq(api_key=API_KEY.strip())
-                            ocr_resp = ocr_client.chat.completions.create(
-                                model=MODEL_NAME,
-                                messages=[
-                                    {
-                                        "role": "user",
-                                        "content": [
-                                            {"type": "text", "text": "อ่านโจทย์จากรูปนี้ แล้วสรุปเป็นบรรทัดสั้น ๆ ทีละบรรทัดเพื่อให้ผู้เรียนเลือกจุดที่สงสัย"},
-                                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                                        ]
-                                    }
-                                ]
-                            )
-                            st.session_state.image_ocr_text = ocr_resp.choices[0].message.content or ""
-                            st.success("✅ ดึงข้อความจากรูปแล้ว")
-                        except Exception as e:
-                            st.error(f"ดึงข้อความจากรูปไม่สำเร็จ: {e}")
-            else:
-                st.info("ℹ️ ถ้าต้องการดึงข้อความจากรูปอัตโนมัติ ให้เลือกโมเดลที่รองรับ Vision")
+                if sidebar_is_vision:
+                    if st.button("🔎 ดึงข้อความจากรูป (OCR AI)", use_container_width=True):
+                        if not API_KEY.strip():
+                            st.warning("กรุณาใส่ API Key ก่อนดึงข้อความจากรูป")
+                        else:
+                            try:
+                                ocr_client = Groq(api_key=API_KEY.strip())
+                                ocr_resp = ocr_client.chat.completions.create(
+                                    model=MODEL_NAME,
+                                    messages=[
+                                        {
+                                            "role": "user",
+                                            "content": [
+                                                {"type": "text", "text": "อ่านโจทย์จากรูปนี้ แล้วสรุปเป็นบรรทัดสั้น ๆ ทีละบรรทัดเพื่อให้ผู้เรียนเลือกจุดที่สงสัย"},
+                                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                                            ]
+                                        }
+                                    ]
+                                )
+                                st.session_state.image_ocr_text = ocr_resp.choices[0].message.content or ""
+                                st.success("✅ ดึงข้อความจากรูปแล้ว")
+                            except Exception as e:
+                                st.error(f"ดึงข้อความจากรูปไม่สำเร็จ: {e}")
+                else:
+                    st.info("ℹ️ ถ้าต้องการดึงข้อความจากรูปอัตโนมัติ ให้เลือกโมเดลที่รองรับ Vision")
 
-            if st.session_state.image_ocr_text.strip():
+            if enable_focus_mode and st.session_state.image_ocr_text.strip():
                 st.caption("เลือกบรรทัดที่อยากถามต่อ")
                 ocr_lines = [ln.strip(" -•\t") for ln in st.session_state.image_ocr_text.splitlines() if ln.strip()]
                 if ocr_lines:
@@ -500,28 +529,29 @@ with st.sidebar:
                 approx_tok = count_tokens_approx(file_content)
                 st.success(f"✅ PDF {n_pages} หน้า (~{approx_tok:,} tokens)")
 
-                page_options = list(range(1, n_pages + 1))
-                selected_pages = st.multiselect(
-                    "📄 เลือกหน้าที่สงสัย",
-                    options=page_options,
-                    default=page_options[:1] if page_options else [],
-                    key="pdf_selected_pages"
-                )
-
-                focused_pdf_text = "\n\n".join(
-                    [f"[หน้า {p}]\n{pages[p - 1]}" for p in selected_pages if 1 <= p <= n_pages]
-                ) if selected_pages else file_content
-
-                chunks = split_text_chunks(focused_pdf_text, chunk_size=500)
-                if chunks:
-                    selected_chunk_indices = st.multiselect(
-                        "✂️ เลือกช่วงข้อความที่สงสัย",
-                        options=list(range(len(chunks))),
-                        format_func=lambda idx: f"ช่วง {idx + 1}: {clean_snippet(chunks[idx], 100)}",
-                        key="pdf_chunk_indices"
+                if enable_focus_mode:
+                    page_options = list(range(1, n_pages + 1))
+                    selected_pages = st.multiselect(
+                        "📄 เลือกหน้าที่สงสัย",
+                        options=page_options,
+                        default=page_options[:1] if page_options else [],
+                        key="pdf_selected_pages"
                     )
-                    for idx in selected_chunk_indices:
-                        reference_blocks.append(f"[PDF ช่วง {idx + 1}] {chunks[idx]}")
+
+                    focused_pdf_text = "\n\n".join(
+                        [f"[หน้า {p}]\n{pages[p - 1]}" for p in selected_pages if 1 <= p <= n_pages]
+                    ) if selected_pages else file_content
+
+                    chunks = split_text_chunks(focused_pdf_text, chunk_size=500)
+                    if chunks:
+                        selected_chunk_indices = st.multiselect(
+                            "✂️ เลือกช่วงข้อความที่สงสัย",
+                            options=list(range(len(chunks))),
+                            format_func=lambda idx: f"ช่วง {idx + 1}: {clean_snippet(chunks[idx], 100)}",
+                            key="pdf_chunk_indices"
+                        )
+                        for idx in selected_chunk_indices:
+                            reference_blocks.append(f"[PDF ช่วง {idx + 1}] {chunks[idx]}")
             except Exception as e:
                 st.error(f"อ่าน PDF ไม่ได้: {e}")
         else:
@@ -530,23 +560,23 @@ with st.sidebar:
                 approx_tok = count_tokens_approx(file_content)
                 st.success(f"✅ ไฟล์ข้อความ (~{approx_tok:,} tokens)")
 
-                txt_chunks = split_text_chunks(file_content, chunk_size=500)
-                if txt_chunks:
-                    selected_txt_indices = st.multiselect(
-                        "✂️ เลือกช่วงข้อความที่สงสัย",
-                        options=list(range(len(txt_chunks))),
-                        format_func=lambda idx: f"ช่วง {idx + 1}: {clean_snippet(txt_chunks[idx], 100)}",
-                        key="txt_chunk_indices"
-                    )
-                    for idx in selected_txt_indices:
-                        reference_blocks.append(f"[TXT ช่วง {idx + 1}] {txt_chunks[idx]}")
+                if enable_focus_mode:
+                    txt_chunks = split_text_chunks(file_content, chunk_size=500)
+                    if txt_chunks:
+                        selected_txt_indices = st.multiselect(
+                            "✂️ เลือกช่วงข้อความที่สงสัย",
+                            options=list(range(len(txt_chunks))),
+                            format_func=lambda idx: f"ช่วง {idx + 1}: {clean_snippet(txt_chunks[idx], 100)}",
+                            key="txt_chunk_indices"
+                        )
+                        for idx in selected_txt_indices:
+                            reference_blocks.append(f"[TXT ช่วง {idx + 1}] {txt_chunks[idx]}")
             except:
                 st.error("อ่านไฟล์ไม่ได้")
 
-    custom_focus_question = st.text_area(
-        "❓ จุดที่ยังไม่เข้าใจเป็นพิเศษ",
-        placeholder="เช่น ทำไมขั้นนี้ต้องใช้ Integration by Parts หรือช่วยอธิบายเฉพาะการแทนค่า",
-        height=80
+    custom_focus_question = st.text_input(
+        "❓ จุดที่ยังไม่เข้าใจ (ถ้ามี)",
+        placeholder="เช่น ทำไมขั้นนี้ต้องใช้ Integration by Parts"
     )
 
     st.divider()
@@ -555,32 +585,33 @@ with st.sidebar:
     total_msgs = len(st.session_state.messages)
     total_chars = sum(len(str(m.get("content", ""))) for m in st.session_state.messages)
 
-    col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        st.metric("💬 ข้อความ", total_msgs)
-    with col_s2:
-        st.metric("📊 ~Tokens", f"{count_tokens_approx(total_chars * 4):,}")
+    with st.expander("📊 สถิติและคำแนะนำ", expanded=False):
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            st.metric("💬 ข้อความ", total_msgs)
+        with col_s2:
+            st.metric("📊 ~Tokens", f"{count_tokens_approx(total_chars * 4):,}")
 
-    if st.session_state.weakness_counts:
-        st.markdown("### 📌 จุดที่ควรทบทวน")
-        top_topics = sorted(
-            st.session_state.weakness_counts.items(),
-            key=lambda item: item[1],
-            reverse=True
-        )[:3]
-        topic_to_prompt = {
-            "พีชคณิต": "ช่วยออกแบบแบบฝึกหัดพีชคณิต 3 ข้อ โดยไล่ง่ายไปยากและเฉลยทีละขั้น",
-            "แคลคูลัส": "ช่วยทบทวนแคลคูลัสหัวข้ออนุพันธ์/อินทิเกรตแบบสั้น แล้วให้โจทย์ฝึก 2 ข้อ",
-            "ตรีโกณมิติ": "ช่วยสรุปตรีโกณมิติที่มักสับสน พร้อมตัวอย่างโจทย์ 2 ข้อ",
-            "เรขาคณิต": "ช่วยสรุปสูตรเรขาคณิตที่ต้องจำ และทดสอบฉันด้วยโจทย์ 2 ข้อ",
-            "สถิติ": "ช่วยติวสถิติพื้นฐานแบบเข้าใจง่าย พร้อมโจทย์ฝึก 2 ข้อ",
-            "เมทริกซ์": "ช่วยสอนเมทริกซ์ทีละขั้น และให้แบบฝึกหัดพร้อมตรวจคำตอบ"
-        }
-        for topic, cnt in top_topics:
-            st.write(f"- {topic} ({cnt} ครั้ง)")
-            if st.button(f"ฝึกเพิ่ม: {topic}", key=f"practice_{topic}", use_container_width=True):
-                st.session_state.pending_prompt = topic_to_prompt.get(topic, f"ช่วยสอนเรื่อง {topic} แบบติวเตอร์ส่วนตัว")
-                st.rerun()
+        if st.session_state.weakness_counts:
+            st.markdown("### 📌 จุดที่ควรทบทวน")
+            top_topics = sorted(
+                st.session_state.weakness_counts.items(),
+                key=lambda item: item[1],
+                reverse=True
+            )[:3]
+            topic_to_prompt = {
+                "พีชคณิต": "ช่วยออกแบบแบบฝึกหัดพีชคณิต 3 ข้อ โดยไล่ง่ายไปยากและเฉลยทีละขั้น",
+                "แคลคูลัส": "ช่วยทบทวนแคลคูลัสหัวข้ออนุพันธ์/อินทิเกรตแบบสั้น แล้วให้โจทย์ฝึก 2 ข้อ",
+                "ตรีโกณมิติ": "ช่วยสรุปตรีโกณมิติที่มักสับสน พร้อมตัวอย่างโจทย์ 2 ข้อ",
+                "เรขาคณิต": "ช่วยสรุปสูตรเรขาคณิตที่ต้องจำ และทดสอบฉันด้วยโจทย์ 2 ข้อ",
+                "สถิติ": "ช่วยติวสถิติพื้นฐานแบบเข้าใจง่าย พร้อมโจทย์ฝึก 2 ข้อ",
+                "เมทริกซ์": "ช่วยสอนเมทริกซ์ทีละขั้น และให้แบบฝึกหัดพร้อมตรวจคำตอบ"
+            }
+            for topic, cnt in top_topics:
+                st.write(f"- {topic} ({cnt} ครั้ง)")
+                if st.button(f"ฝึกเพิ่ม: {topic}", key=f"practice_{topic}", use_container_width=True):
+                    st.session_state.pending_prompt = topic_to_prompt.get(topic, f"ช่วยสอนเรื่อง {topic} แบบติวเตอร์ส่วนตัว")
+                    st.rerun()
 
     if st.button("🗑️ ล้างการสนทนา", use_container_width=True):
         st.session_state.messages = []
