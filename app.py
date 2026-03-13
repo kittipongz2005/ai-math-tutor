@@ -1190,60 +1190,63 @@ with st.sidebar:
                     )
                     st.rerun()
 
-            st.markdown("### 🖨️ Smart Worksheet Generator")
-            worksheet_q_count = st.slider(
-                "จำนวนข้อสำหรับใบงานทบทวน",
-                min_value=5,
-                max_value=10,
-                value=7,
-                step=1,
-                key="worksheet_q_count",
-            )
+        st.markdown("### 🖨️ Smart Worksheet Generator")
+        if not st.session_state.weakness_counts:
+            st.caption("ยังไม่มีข้อมูลจุดอ่อนในเซสชันนี้ ระบบจะแสดงปุ่มไว้สำหรับเดโม แต่ต้องถามโจทย์อย่างน้อย 1 ครั้งก่อนสร้างใบงาน")
 
-            if st.button("สร้างแบบฝึกหัดทบทวนจุดอ่อน", use_container_width=True, key="gen_weakness_worksheet"):
-                if not API_KEY.strip():
-                    st.warning("กรุณาใส่ Groq API Key ก่อนสร้างใบงาน")
-                else:
-                    with st.spinner("กำลังสร้างใบงานจากหัวข้อที่พลาดบ่อย..."):
-                        worksheet_payload, ws_err = build_weakness_worksheet_payload(
-                            api_key=API_KEY.strip(),
-                            model_name=MODEL_NAME,
+        worksheet_q_count = st.slider(
+            "จำนวนข้อสำหรับใบงานทบทวน",
+            min_value=5,
+            max_value=10,
+            value=7,
+            step=1,
+            key="worksheet_q_count",
+        )
+
+        if st.button("สร้างแบบฝึกหัดทบทวนจุดอ่อน", use_container_width=True, key="gen_weakness_worksheet"):
+            if not API_KEY.strip():
+                st.warning("กรุณาใส่ Groq API Key ก่อนสร้างใบงาน")
+            else:
+                with st.spinner("กำลังสร้างใบงานจากหัวข้อที่พลาดบ่อย..."):
+                    worksheet_payload, ws_err = build_weakness_worksheet_payload(
+                        api_key=API_KEY.strip(),
+                        model_name=MODEL_NAME,
+                        weakness_counts=st.session_state.weakness_counts,
+                        learner_level=learner_level,
+                        language_pref=language_pref,
+                        question_count=worksheet_q_count,
+                    )
+                    if ws_err:
+                        st.error(ws_err)
+                        st.session_state.worksheet_pdf_bytes = b""
+                        st.session_state.worksheet_pdf_name = ""
+                        st.session_state.worksheet_pdf_ready = False
+                    else:
+                        pdf_bytes, pdf_err = build_weakness_worksheet_pdf_bytes(
+                            worksheet=worksheet_payload,
                             weakness_counts=st.session_state.weakness_counts,
-                            learner_level=learner_level,
-                            language_pref=language_pref,
-                            question_count=worksheet_q_count,
                         )
-                        if ws_err:
-                            st.error(ws_err)
+                        if pdf_err:
+                            st.error(pdf_err)
                             st.session_state.worksheet_pdf_bytes = b""
                             st.session_state.worksheet_pdf_name = ""
                             st.session_state.worksheet_pdf_ready = False
                         else:
-                            pdf_bytes, pdf_err = build_weakness_worksheet_pdf_bytes(
-                                worksheet=worksheet_payload,
-                                weakness_counts=st.session_state.weakness_counts,
-                            )
-                            if pdf_err:
-                                st.error(pdf_err)
-                                st.session_state.worksheet_pdf_bytes = b""
-                                st.session_state.worksheet_pdf_name = ""
-                                st.session_state.worksheet_pdf_ready = False
-                            else:
-                                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                                st.session_state.worksheet_pdf_bytes = pdf_bytes
-                                st.session_state.worksheet_pdf_name = f"weakness_worksheet_{stamp}.pdf"
-                                st.session_state.worksheet_pdf_ready = True
-                                st.success("สร้างใบงานสำเร็จ — พร้อมดาวน์โหลด PDF")
+                            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            st.session_state.worksheet_pdf_bytes = pdf_bytes
+                            st.session_state.worksheet_pdf_name = f"weakness_worksheet_{stamp}.pdf"
+                            st.session_state.worksheet_pdf_ready = True
+                            st.success("สร้างใบงานสำเร็จ — พร้อมดาวน์โหลด PDF")
 
-            if st.session_state.worksheet_pdf_ready and st.session_state.worksheet_pdf_bytes:
-                st.download_button(
-                    "ดาวน์โหลดใบงาน PDF",
-                    data=st.session_state.worksheet_pdf_bytes,
-                    file_name=st.session_state.worksheet_pdf_name or "weakness_worksheet.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    key="download_weakness_worksheet_pdf",
-                )
+        if st.session_state.worksheet_pdf_ready and st.session_state.worksheet_pdf_bytes:
+            st.download_button(
+                "ดาวน์โหลดใบงาน PDF",
+                data=st.session_state.worksheet_pdf_bytes,
+                file_name=st.session_state.worksheet_pdf_name or "weakness_worksheet.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_weakness_worksheet_pdf",
+            )
 
     if st.button("🗑️ ล้างการสนทนา", use_container_width=True):
         reset_current_chat()
