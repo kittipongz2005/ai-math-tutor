@@ -795,23 +795,6 @@ for msg_idx, message in enumerate(st.session_state.messages):
         if "plot" in message:
             st.pyplot(message["plot"])
 
-        # ── Socratic "continue" button for last AI message only
-        if (
-            message["role"] == "assistant"
-            and "Socratic" in tutor_mode
-            and msg_idx == len(st.session_state.messages) - 1
-        ):
-            final_text = str(content).split("</think>")[-1].strip()
-            if st.button(
-                "➡️  ไปต่อ — สอนขั้นถัดไป",
-                key=f"soc_cont_{msg_idx}",
-                use_container_width=False,
-            ):
-                st.session_state.pending_prompt = (
-                    f"จากคำตอบล่าสุดนี้:\n{clean_snippet(final_text, 220)}\n\nไปต่อ"
-                )
-                st.rerun()
-
 # ─────────────────────────────────────────────
 #  Chat Input
 # ─────────────────────────────────────────────
@@ -820,8 +803,18 @@ queued_prompt = st.session_state.pending_prompt.strip()
 prompt        = typed_prompt if typed_prompt else (queued_prompt if queued_prompt else "")
 
 if prompt:
+    prompt_lower = str(prompt).lower()
+    is_continue_request = "ไปต่อ" in prompt_lower
+    is_full_solution_request = "เฉลยเต็ม" in prompt_lower
+
     if queued_prompt and not typed_prompt:
         st.session_state.pending_prompt = ""
+
+    if "Socratic" in tutor_mode:
+        if is_continue_request:
+            st.session_state.socratic_continue = True
+        elif typed_prompt:
+            st.session_state.socratic_continue = False
 
     if not API_KEY.strip():
         st.error("⚠️ กรุณาใส่ Groq API Key ที่แถบด้านซ้ายก่อนครับ")
@@ -842,6 +835,19 @@ if prompt:
 
     # ── Build System Prompt
     if "Socratic" in tutor_mode:
+        overview_only_instruction = (
+            "\n7. ถ้ายังไม่ใช่คำสั่ง 'ไปต่อ' หรือ 'เฉลยเต็ม' ให้ตอบแบบภาพรวมเท่านั้น:"
+            " บอกจำนวนขั้นตอนและสิ่งที่จะทำในแต่ละขั้นแบบสั้น ๆ ห้ามคำนวณละเอียด"
+            " และห้ามเฉลยผลลัพธ์สุดท้าย"
+            "\n8. ตอนท้ายให้ปิดด้วยประโยค: 'พร้อมแล้วกดปุ่ม ➡️ ไปต่อ'"
+        )
+        continue_step_instruction = (
+            "\n7. เมื่อได้รับคำสั่ง 'ไปต่อ' ให้สอนเฉพาะขั้นถัดไป 1 ขั้นเท่านั้น"
+            " และจบด้วยประโยค: 'พร้อมแล้วกดปุ่ม ➡️ ไปต่อ'"
+        )
+
+        stage_rule = continue_step_instruction if (is_continue_request or st.session_state.socratic_continue) else overview_only_instruction
+
         base_sys = (
             "คุณคือติวเตอร์คณิตศาสตร์ส่วนตัว (โหมดฝึกทีละขั้น)\n"
             "กฎเหล็ก:\n"
@@ -851,6 +857,7 @@ if prompt:
             "4. เฉลยเต็มได้เมื่อผู้เรียนพิมพ์ 'เฉลยเต็ม'\n"
             "5. เมื่อผู้เรียนพิมพ์ 'ไปต่อ' ให้สอนเพียง 1 ขั้นถัดไป แล้วถามกลับ\n"
             "6. ทุกสมการอยู่ใน LaTeX"
+            f"{stage_rule}"
         )
     elif "อธิบายละเอียด" in response_style:
         base_sys = (
@@ -967,9 +974,8 @@ if prompt:
                     key="soc_cont_stream",
                     use_container_width=False,
                 ):
-                    st.session_state.pending_prompt = (
-                        f"จากคำตอบล่าสุดนี้:\n{clean_snippet(final_answer, 220)}\n\nไปต่อ"
-                    )
+                    st.session_state.pending_prompt = "ไปต่อ"
+                    st.session_state.socratic_continue = True
                     st.rerun()
 
             # ── Auto-plot graph if code block exists
