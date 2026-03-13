@@ -1502,6 +1502,8 @@ if prompt:
                 model=MODEL_NAME,
                 messages=messages_for_ai,
                 stream=True,
+                max_tokens=8192,
+                temperature=0.2,
             )
 
             for chunk in stream:
