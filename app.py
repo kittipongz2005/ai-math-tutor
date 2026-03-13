@@ -499,6 +499,8 @@ for key, val in {
     "chat_history": [],
     "quick_mode": "ติวละเอียด",
     "last_quick_mode": "ติวละเอียด",
+    "pending_quick_mode_restore": "",
+    "pending_last_mode_restore": "",
     "storage_loaded": False,
 }.items():
     if key not in st.session_state:
@@ -632,6 +634,40 @@ def is_socratic_done(text: str, force_done: bool = False) -> bool:
     return any(marker in lowered for marker in done_markers)
 
 
+def violates_socratic_overview(text: str) -> bool:
+    raw = str(text)
+    lowered = raw.lower()
+
+    patterns = [
+        r'คำตอบสุดท้าย',
+        r'\\boxed',
+        r'final answer',
+        r'=\s*[^\n=]{1,120}\+\s*C\b',
+        r'\[\[STEP_STATUS:DONE\]\]',
+    ]
+    if any(re.search(p, raw, flags=re.IGNORECASE) for p in patterns):
+        return True
+
+    # ถ้ามีสมการยาวหลายบรรทัด + มีสัญญาณสรุปคำตอบ ให้ถือว่าหลุดเฉลย
+    has_many_eq_lines = len(re.findall(r'^\s*[=]', raw, flags=re.MULTILINE)) >= 2
+    if has_many_eq_lines and ("ดังนั้น" in lowered or "จึงได้" in lowered or "สรุป" in lowered):
+        return True
+
+    return False
+
+
+def build_socratic_overview_fallback() -> str:
+    return (
+        "แผนการทำข้อนี้ (ภาพรวมก่อน ยังไม่เฉลย):\n\n"
+        "1. เลือกวิธีหลักที่เหมาะกับรูปโจทย์\n"
+        "2. จัดรูปสมการให้พร้อมแทนสูตร\n"
+        "3. ทำทีละขั้นจนได้รูปใกล้คำตอบ\n"
+        "4. ตรวจความถูกต้องของรูปสุดท้าย\n\n"
+        "พร้อมแล้วกดปุ่ม ➡️ ไปต่อ\n"
+        "[[STEP_STATUS:CONTINUE]]"
+    )
+
+
 def build_profile_prompt(level, speed, lang, mode) -> str:
     return (
         f"ผู้เรียน: ระดับ {level} | ความเร็ว: {speed} | ภาษา: {lang} | โหมด: {mode}\n"
@@ -754,8 +790,8 @@ def load_chat_snapshot(snapshot: dict):
     st.session_state.socratic_can_continue = False
     mode_from_snapshot = snapshot.get("mode", "ติวละเอียด")
     if mode_from_snapshot in ["ติวละเอียด", "ฝึกทีละขั้น", "เฉลยไว"]:
-        st.session_state.quick_mode = mode_from_snapshot
-        st.session_state.last_quick_mode = mode_from_snapshot
+        st.session_state.pending_quick_mode_restore = mode_from_snapshot
+        st.session_state.pending_last_mode_restore = mode_from_snapshot
     save_store()
 
 
@@ -781,6 +817,13 @@ if sel_query:
 #  SIDEBAR
 # ─────────────────────────────────────────────
 with st.sidebar:
+    if st.session_state.pending_quick_mode_restore:
+        st.session_state.quick_mode = st.session_state.pending_quick_mode_restore
+        st.session_state.pending_quick_mode_restore = ""
+    if st.session_state.pending_last_mode_restore:
+        st.session_state.last_quick_mode = st.session_state.pending_last_mode_restore
+        st.session_state.pending_last_mode_restore = ""
+
     st.markdown("### ⚙️ ตั้งค่าระบบ")
 
     API_KEY = st.text_input(
@@ -1075,7 +1118,9 @@ if prompt:
             "\n7. ถ้ายังไม่ใช่คำสั่ง 'ไปต่อ' หรือ 'เฉลยเต็ม' ให้ตอบแบบภาพรวมเท่านั้น:"
             " บอกจำนวนขั้นตอนและสิ่งที่จะทำในแต่ละขั้นแบบสั้น ๆ ห้ามคำนวณละเอียด"
             " และห้ามเฉลยผลลัพธ์สุดท้าย"
-            "\n8. ตอนท้ายให้ปิดด้วยประโยค: 'พร้อมแล้วกดปุ่ม ➡️ ไปต่อ'"
+            "\n8. ห้ามแสดงคำตอบสุดท้าย ห้ามใช้ \\boxed{...} และห้ามสรุปเป็น = ... + C ในรอบนี้"
+            "\n9. ตอนท้ายให้ปิดด้วยประโยค: 'พร้อมแล้วกดปุ่ม ➡️ ไปต่อ'"
+            " และใส่ [[STEP_STATUS:CONTINUE]]"
         )
         continue_step_instruction = (
             "\n7. เมื่อได้รับคำสั่ง 'ไปต่อ' ให้สอนเฉพาะขั้นถัดไป 1 ขั้นเท่านั้น"
@@ -1085,6 +1130,7 @@ if prompt:
         )
 
         stage_rule = continue_step_instruction if (is_continue_request or st.session_state.socratic_continue) else overview_only_instruction
+        should_force_overview = not is_continue_request and not is_full_solution_request and not st.session_state.socratic_continue
 
         base_sys = (
             "คุณคือติวเตอร์คณิตศาสตร์ส่วนตัว (โหมดฝึกทีละขั้น)\n"
@@ -1119,6 +1165,7 @@ if prompt:
             "4. บรรทัดล่างสุด: **คำตอบสุดท้าย:** ตามด้วยสมการ\n"
             "5. ห้ามส่งสมการที่ไม่จบหรือวงเล็บไม่ครบ"
         )
+        should_force_overview = False
 
     profile   = build_profile_prompt(learner_level, explain_speed, language_pref, tutor_mode)
     sys_prompt = f"{base_sys}\n\n{profile}"
@@ -1213,6 +1260,10 @@ if prompt:
                 if "</think>" in full_response
                 else full_response
             )
+
+            if "Socratic" in tutor_mode and should_force_overview and violates_socratic_overview(final_answer_raw):
+                final_answer_raw = build_socratic_overview_fallback()
+
             is_done_now = False
             if "Socratic" in tutor_mode:
                 is_done_now = is_socratic_done(final_answer_raw, force_done=is_full_solution_request)
