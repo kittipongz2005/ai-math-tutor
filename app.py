@@ -4,6 +4,7 @@ import time
 import io
 import re
 import base64
+import copy
 from PIL import Image
 import matplotlib.pyplot as plt
 import numpy as np
@@ -489,6 +490,9 @@ for key, val in {
     "pending_prompt": "",
     "weakness_counts": {},
     "socratic_continue": False,
+    "chat_history": [],
+    "quick_mode": "ติวละเอียด",
+    "last_quick_mode": "ติวละเอียด",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -517,6 +521,24 @@ def ensure_math_renderable(text: str) -> str:
     t = str(text).strip()
     if not t:
         return t
+
+    t = t.replace("−", "-")
+
+    if t.count("\\left") != t.count("\\right"):
+        t = t.replace("\\left", "").replace("\\right", "")
+
+    open_brace = t.count("{")
+    close_brace = t.count("}")
+    if open_brace > close_brace and (open_brace - close_brace) <= 6:
+        t += "}" * (open_brace - close_brace)
+
+    open_paren = t.count("(")
+    close_paren = t.count(")")
+    if open_paren > close_paren and (open_paren - close_paren) <= 4:
+        t += ")" * (open_paren - close_paren)
+
+    if re.search(r'(^|\n)\s*[=+\-]\s*\\', t) and "$$" not in t:
+        t = f"$$\n\\begin{{aligned}}\n{t}\n\\end{{aligned}}\n$$"
     if t.lstrip().startswith("&") and "\\end{aligned}" in t and "\\begin{aligned}" not in t:
         t = "\\begin{aligned}\n" + t
     if "\\begin{aligned}" in t and "\\end{aligned}" not in t:
@@ -592,6 +614,47 @@ def build_profile_prompt(level, speed, lang, mode) -> str:
         "ปรับเนื้อหาให้เหมาะกับระดับผู้เรียน และปรับความยาวคำอธิบายตามความเร็วที่เลือก"
     )
 
+
+def reset_current_chat():
+    st.session_state.messages = []
+    st.session_state.pending_prompt = ""
+    st.session_state.weakness_counts = {}
+    st.session_state.socratic_continue = False
+
+
+def archive_current_chat(mode_name: str):
+    if not st.session_state.messages:
+        return
+
+    first_user = next(
+        (m.get("content", "") for m in st.session_state.messages if m.get("role") == "user"),
+        "แชทคณิตศาสตร์"
+    )
+    title = clean_snippet(first_user, 50) or "แชทคณิตศาสตร์"
+
+    snapshot = {
+        "id": f"chat_{int(time.time() * 1000)}",
+        "title": title,
+        "mode": mode_name,
+        "messages": copy.deepcopy(st.session_state.messages),
+        "weakness_counts": copy.deepcopy(st.session_state.weakness_counts),
+        "updated_at": time.strftime("%H:%M"),
+    }
+
+    st.session_state.chat_history.insert(0, snapshot)
+    st.session_state.chat_history = st.session_state.chat_history[:30]
+
+
+def load_chat_snapshot(snapshot: dict):
+    st.session_state.messages = copy.deepcopy(snapshot.get("messages", []))
+    st.session_state.weakness_counts = copy.deepcopy(snapshot.get("weakness_counts", {}))
+    st.session_state.pending_prompt = ""
+    st.session_state.socratic_continue = False
+    mode_from_snapshot = snapshot.get("mode", "ติวละเอียด")
+    if mode_from_snapshot in ["ติวละเอียด", "ฝึกทีละขั้น", "เฉลยไว"]:
+        st.session_state.quick_mode = mode_from_snapshot
+        st.session_state.last_quick_mode = mode_from_snapshot
+
 # ─────────────────────────────────────────────
 #  Handle selection query param
 # ─────────────────────────────────────────────
@@ -626,7 +689,13 @@ with st.sidebar:
         ["ติวละเอียด", "ฝึกทีละขั้น", "เฉลยไว"],
         horizontal=True,
         label_visibility="collapsed",
+        key="quick_mode",
     )
+
+    if st.session_state.last_quick_mode != quick_mode:
+        archive_current_chat(st.session_state.last_quick_mode)
+        reset_current_chat()
+        st.session_state.last_quick_mode = quick_mode
 
     # Map quick mode → style/tutor_mode
     mode_map = {
@@ -638,9 +707,9 @@ with st.sidebar:
 
     # Defaults
     MODEL_NAME      = "qwen/qwen3-32b"
-    learner_level   = "ม.ปลาย"
+    learner_level   = "มหาวิทยาลัยปีต้น"
     explain_speed   = "พอดี"
-    language_pref   = "ไทย"
+    language_pref   = "ไทย+อังกฤษศัพท์สำคัญ"
 
     with st.expander("⚙️ ตั้งค่าขั้นสูง", expanded=False):
         MODEL_NAME = st.selectbox(
@@ -683,6 +752,22 @@ with st.sidebar:
         f'<span class="model-chip">✦ {model_short}</span></div>',
         unsafe_allow_html=True,
     )
+
+    st.divider()
+
+    # ── Chat History
+    with st.expander("🕘 ประวัติการถาม", expanded=False):
+        if not st.session_state.chat_history:
+            st.caption("ยังไม่มีประวัติแชท")
+        else:
+            for i, snap in enumerate(st.session_state.chat_history[:12]):
+                col_t, col_b = st.columns([3.2, 1])
+                col_t.markdown(f"**{snap.get('title', 'แชทคณิตศาสตร์')}**")
+                col_t.caption(f"{snap.get('mode', '-') } · {snap.get('updated_at', '-')}")
+                if col_b.button("เปิด", key=f"open_hist_{snap.get('id', i)}"):
+                    archive_current_chat(st.session_state.last_quick_mode)
+                    load_chat_snapshot(snap)
+                    st.rerun()
 
     st.divider()
 
@@ -756,9 +841,7 @@ with st.sidebar:
                     st.rerun()
 
     if st.button("🗑️ ล้างการสนทนา", use_container_width=True):
-        for k in ("messages", "pending_prompt", "weakness_counts"):
-            st.session_state[k] = [] if k == "messages" else ({} if k == "weakness_counts" else "")
-        st.session_state.socratic_continue = False
+        reset_current_chat()
         st.rerun()
 
     st.caption("🔒 API Key ไม่ถูกบันทึก")
@@ -875,7 +958,8 @@ if prompt:
             "3. ตรวจคำตอบผู้เรียนอย่างตรงจุด\n"
             "4. เฉลยเต็มได้เมื่อผู้เรียนพิมพ์ 'เฉลยเต็ม'\n"
             "5. เมื่อผู้เรียนพิมพ์ 'ไปต่อ' ให้สอนเพียง 1 ขั้นถัดไป แล้วถามกลับ\n"
-            "6. ทุกสมการอยู่ใน LaTeX"
+            "6. ทุกสมการอยู่ใน LaTeX\n"
+            "7. ก่อนส่งคำตอบ ตรวจว่าวงเล็บ (), {}, และรูปแบบ LaTeX ปิดครบ ห้ามส่งสมการที่ขาดท้าย"
             f"{stage_rule}"
         )
     elif "อธิบายละเอียด" in response_style:
@@ -885,7 +969,8 @@ if prompt:
             "1. บอกเหตุผลทุกครั้งว่า 'ทำไมถึงใช้สูตรนี้'\n"
             "2. โครงสร้าง: **1. วิเคราะห์โจทย์** → **2. วิธีทำ** → **3. สรุปคำตอบ**\n"
             "3. บังคับใช้ LaTeX ทุกสมการ\n"
-            "4. ตอบเฉพาะข้อที่ผู้ใช้สั่ง"
+            "4. ตอบเฉพาะข้อที่ผู้ใช้สั่ง\n"
+            "5. ตรวจให้แน่ใจว่าสมการปิดวงเล็บครบก่อนส่ง"
         )
     else:
         base_sys = (
@@ -894,7 +979,8 @@ if prompt:
             "1. ห้ามคำบรรยายภาษาไทย ยกเว้น 'คำตอบสุดท้าย:'\n"
             "2. แสดงเฉพาะบรรทัดสมการเรียงลงมาจนจบ\n"
             "3. ใช้ LaTeX Aligned: $$ \\begin{aligned} … \\end{aligned} $$\n"
-            "4. บรรทัดล่างสุด: **คำตอบสุดท้าย:** ตามด้วยสมการ"
+            "4. บรรทัดล่างสุด: **คำตอบสุดท้าย:** ตามด้วยสมการ\n"
+            "5. ห้ามส่งสมการที่ไม่จบหรือวงเล็บไม่ครบ"
         )
 
     profile   = build_profile_prompt(learner_level, explain_speed, language_pref, tutor_mode)
