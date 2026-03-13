@@ -762,21 +762,22 @@ def build_chat_export_markdown(messages: list) -> str:
 
 
 def build_chat_export_html(messages: list) -> str:
-        blocks = []
-        for idx, msg in enumerate(messages, 1):
-                role = "ผู้ใช้" if msg.get("role") == "user" else "AI ติวเตอร์"
-                role_class = "user" if msg.get("role") == "user" else "assistant"
-                content = clean_content_for_export(str(msg.get("content", ""))).strip() or "(ว่าง)"
-                safe_content = html.escape(content).replace("\n", "<br>")
-                blocks.append(
-                        f'<article class="msg {role_class}">' 
-                        f'<div class="meta">{idx}. {role}</div>'
-                        f'<div class="content math-zone">{safe_content}</div>'
-                        f'</article>'
-                )
+    blocks = []
+    for idx, msg in enumerate(messages, 1):
+        role = "ผู้ใช้" if msg.get("role") == "user" else "AI ติวเตอร์"
+        role_class = "user" if msg.get("role") == "user" else "assistant"
+        content = clean_content_for_export(str(msg.get("content", ""))).strip() or "(ว่าง)"
+        safe_content = html.escape(content)
+        safe_content = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', safe_content)
+        blocks.append(
+            f'<article class="msg {role_class}">'
+            f'<div class="meta">{idx}. {role}</div>'
+            f'<div class="content math-zone">{safe_content}</div>'
+            f'</article>'
+        )
 
-        exported_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        return f"""<!doctype html>
+    exported_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return f"""<!doctype html>
 <html lang=\"th\">
 <head>
     <meta charset=\"UTF-8\" />
@@ -808,7 +809,7 @@ def build_chat_export_html(messages: list) -> str:
         .msg.user {{ border-left: 4px solid #3b82f6; }}
         .msg.assistant {{ border-left: 4px solid #8b5cf6; }}
         .meta {{ font-size: 0.86rem; color: #334155; font-weight: 700; margin-bottom: 6px; }}
-        .content {{ white-space: normal; word-break: break-word; }}
+        .content {{ white-space: pre-wrap; overflow-wrap: anywhere; }}
         .katex-display {{ overflow-x: auto; overflow-y: hidden; padding: 2px 0; }}
     </style>
 </head>
