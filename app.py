@@ -14,6 +14,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 from groq import Groq
 
+
+def get_cropper_func():
+    try:
+        cropper_module = importlib.import_module("streamlit_cropper")
+        return getattr(cropper_module, "st_cropper", None)
+    except Exception:
+        return None
+
 SUPABASE_AVAILABLE = True
 
 STORE_PATH = Path(".math_tutor_store.json")
@@ -1057,6 +1065,78 @@ with st.sidebar:
             base64_image = encode_image(uploaded_img)
             st.image(uploaded_img, caption="📸 รูปที่อัปโหลด", use_container_width=True)
             st.success("✅ โหลดรูปสำเร็จ")
+
+            cropper_fn = get_cropper_func()
+            if cropper_fn is not None:
+                st.caption("✂️ ลากครอปเฉพาะสูตร/บรรทัดที่สงสัย แล้วกดวิเคราะห์")
+                cropped_img = cropper_fn(
+                    uploaded_img,
+                    realtime_update=True,
+                    return_type="image",
+                    box_color="#3b82f6",
+                    aspect_ratio=None,
+                    key="formula_cropper",
+                )
+                if cropped_img is not None:
+                    st.image(cropped_img, caption="🧩 ส่วนที่ครอป", use_container_width=True)
+
+                    if st.button("🔍 อธิบายสูตรจากส่วนที่ครอป", use_container_width=True):
+                        if not API_KEY.strip():
+                            st.warning("กรุณาใส่ Groq API Key ก่อน")
+                        else:
+                            try:
+                                vision_prompt = (
+                                    "อ่านข้อความ/สมการจากภาพที่ครอป แล้วอธิบายสั้น ๆ เป็นภาษาไทยว่า:\n"
+                                    "1) นี่คือสูตร/ขั้นตอนอะไร\n"
+                                    "2) มาจากหลักการไหน\n"
+                                    "3) ใช้เมื่อไหร่\n"
+                                    "ตอบให้กระชับและชัดเจน"
+                                )
+                                crop_b64 = encode_image(cropped_img)
+                                client = Groq(api_key=API_KEY.strip())
+
+                                model_candidates = []
+                                if "vision" in MODEL_NAME.lower():
+                                    model_candidates.append(MODEL_NAME)
+                                model_candidates.extend([
+                                    "llama-3.2-11b-vision-preview",
+                                    "llama-3.2-90b-vision-preview",
+                                ])
+
+                                analysis_text = ""
+                                for model_name in model_candidates:
+                                    try:
+                                        resp = client.chat.completions.create(
+                                            model=model_name,
+                                            messages=[
+                                                {
+                                                    "role": "user",
+                                                    "content": [
+                                                        {"type": "text", "text": vision_prompt},
+                                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{crop_b64}"}},
+                                                    ],
+                                                }
+                                            ],
+                                        )
+                                        analysis_text = (resp.choices[0].message.content or "").strip()
+                                        if analysis_text:
+                                            break
+                                    except Exception:
+                                        continue
+
+                                if analysis_text:
+                                    st.session_state.pending_prompt = (
+                                        f"ฉันครอปส่วนนี้มา:\n{analysis_text}\n\n"
+                                        "ช่วยอธิบายเพิ่มว่ามาจากสูตรไหน และเชื่อมกับขั้นตอนในโจทย์ยังไง"
+                                    )
+                                    save_store()
+                                    st.rerun()
+                                else:
+                                    st.error("ยังวิเคราะห์ภาพครอปไม่ได้ ลองเลือกโมเดลที่รองรับ Vision หรือครอปให้ชัดขึ้น")
+                            except Exception as e:
+                                st.error(f"วิเคราะห์ภาพครอปไม่สำเร็จ: {e}")
+            else:
+                st.info("ติดตั้งแพ็กเกจ streamlit-cropper เพื่อใช้ฟีเจอร์ครอปสูตร")
         elif ftype == "application/pdf":
             try:
                 reader = PyPDF2.PdfReader(uploaded_file)
