@@ -5,10 +5,15 @@ import io
 import re
 import base64
 import copy
+import json
+from datetime import datetime
+from pathlib import Path
 from PIL import Image
 import matplotlib.pyplot as plt
 import numpy as np
 from groq import Groq
+
+STORE_PATH = Path(".math_tutor_store.json")
 
 # ─────────────────────────────────────────────
 #  Page Config
@@ -490,9 +495,11 @@ for key, val in {
     "pending_prompt": "",
     "weakness_counts": {},
     "socratic_continue": False,
+    "socratic_can_continue": False,
     "chat_history": [],
     "quick_mode": "ติวละเอียด",
     "last_quick_mode": "ติวละเอียด",
+    "storage_loaded": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -608,6 +615,23 @@ def clean_snippet(text: str, max_len=200) -> str:
     return (one[:max_len] + "…") if len(one) > max_len else one
 
 
+def strip_internal_tags(text: str) -> str:
+    t = str(text)
+    t = re.sub(r'\[\[STEP_STATUS:(DONE|CONTINUE)\]\]', '', t, flags=re.IGNORECASE)
+    return t.strip()
+
+
+def is_socratic_done(text: str, force_done: bool = False) -> bool:
+    if force_done:
+        return True
+    raw = str(text)
+    if re.search(r'\[\[STEP_STATUS:DONE\]\]', raw, flags=re.IGNORECASE):
+        return True
+    lowered = raw.lower()
+    done_markers = ["คำตอบสุดท้าย", "final answer", "สรุปคำตอบสุดท้าย", "เฉลยครบ"]
+    return any(marker in lowered for marker in done_markers)
+
+
 def build_profile_prompt(level, speed, lang, mode) -> str:
     return (
         f"ผู้เรียน: ระดับ {level} | ความเร็ว: {speed} | ภาษา: {lang} | โหมด: {mode}\n"
@@ -615,11 +639,85 @@ def build_profile_prompt(level, speed, lang, mode) -> str:
     )
 
 
+def now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def now_pretty() -> str:
+    return datetime.now().strftime("%d/%m %H:%M")
+
+
+def sanitize_messages_for_storage(messages: list) -> list:
+    sanitized = []
+    for msg in messages:
+        sanitized.append({
+            "role": msg.get("role", "assistant"),
+            "content": str(msg.get("content", "")),
+            "response_style": msg.get("response_style"),
+            "tutor_mode": msg.get("tutor_mode"),
+        })
+    return sanitized
+
+
+def save_store():
+    try:
+        payload = {
+            "chat_history": st.session_state.chat_history,
+            "current_chat": {
+                "messages": sanitize_messages_for_storage(st.session_state.messages),
+                "weakness_counts": st.session_state.weakness_counts,
+                "quick_mode": st.session_state.quick_mode,
+                "last_quick_mode": st.session_state.last_quick_mode,
+            },
+            "updated_at": now_iso(),
+            "version": 1,
+        }
+        STORE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def load_store_once():
+    if st.session_state.storage_loaded:
+        return
+    st.session_state.storage_loaded = True
+
+    if not STORE_PATH.exists():
+        return
+
+    try:
+        payload = json.loads(STORE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return
+
+    history = payload.get("chat_history", [])
+    if isinstance(history, list):
+        st.session_state.chat_history = history[:30]
+
+    current = payload.get("current_chat", {})
+    if isinstance(current, dict):
+        messages = current.get("messages", [])
+        weakness = current.get("weakness_counts", {})
+        quick_mode = current.get("quick_mode", st.session_state.quick_mode)
+        last_mode = current.get("last_quick_mode", quick_mode)
+
+        if isinstance(messages, list):
+            st.session_state.messages = messages
+        if isinstance(weakness, dict):
+            st.session_state.weakness_counts = weakness
+        if quick_mode in ["ติวละเอียด", "ฝึกทีละขั้น", "เฉลยไว"]:
+            st.session_state.quick_mode = quick_mode
+        if last_mode in ["ติวละเอียด", "ฝึกทีละขั้น", "เฉลยไว"]:
+            st.session_state.last_quick_mode = last_mode
+
+
 def reset_current_chat():
     st.session_state.messages = []
     st.session_state.pending_prompt = ""
     st.session_state.weakness_counts = {}
     st.session_state.socratic_continue = False
+    st.session_state.socratic_can_continue = False
+    save_store()
 
 
 def archive_current_chat(mode_name: str):
@@ -636,13 +734,16 @@ def archive_current_chat(mode_name: str):
         "id": f"chat_{int(time.time() * 1000)}",
         "title": title,
         "mode": mode_name,
-        "messages": copy.deepcopy(st.session_state.messages),
+        "messages": sanitize_messages_for_storage(st.session_state.messages),
         "weakness_counts": copy.deepcopy(st.session_state.weakness_counts),
-        "updated_at": time.strftime("%H:%M"),
+        "updated_at": now_pretty(),
+        "created_at": now_pretty(),
+        "message_count": len(st.session_state.messages),
     }
 
     st.session_state.chat_history.insert(0, snapshot)
     st.session_state.chat_history = st.session_state.chat_history[:30]
+    save_store()
 
 
 def load_chat_snapshot(snapshot: dict):
@@ -650,10 +751,15 @@ def load_chat_snapshot(snapshot: dict):
     st.session_state.weakness_counts = copy.deepcopy(snapshot.get("weakness_counts", {}))
     st.session_state.pending_prompt = ""
     st.session_state.socratic_continue = False
+    st.session_state.socratic_can_continue = False
     mode_from_snapshot = snapshot.get("mode", "ติวละเอียด")
     if mode_from_snapshot in ["ติวละเอียด", "ฝึกทีละขั้น", "เฉลยไว"]:
         st.session_state.quick_mode = mode_from_snapshot
         st.session_state.last_quick_mode = mode_from_snapshot
+    save_store()
+
+
+load_store_once()
 
 # ─────────────────────────────────────────────
 #  Handle selection query param
@@ -666,6 +772,7 @@ if sel_query:
         f"ฉันคลุมข้อความนี้จากคำตอบ AI:\n\"{sel_query}\"\n\n"
         "ช่วยอธิบายส่วนนี้แบบเข้าใจง่าย พร้อมสูตรที่เกี่ยวข้องและตัวอย่างสั้น ๆ"
     )
+    save_store()
     if "ask_sel" in st.query_params:
         del st.query_params["ask_sel"]
     st.rerun()
@@ -696,6 +803,7 @@ with st.sidebar:
         archive_current_chat(st.session_state.last_quick_mode)
         reset_current_chat()
         st.session_state.last_quick_mode = quick_mode
+        save_store()
 
     # Map quick mode → style/tutor_mode
     mode_map = {
@@ -757,16 +865,36 @@ with st.sidebar:
 
     # ── Chat History
     with st.expander("🕘 ประวัติการถาม", expanded=False):
+        col_new, col_clear = st.columns(2)
+        if col_new.button("＋ แชทใหม่", use_container_width=True):
+            archive_current_chat(st.session_state.last_quick_mode)
+            reset_current_chat()
+            st.rerun()
+        if col_clear.button("ล้างประวัติ", use_container_width=True):
+            st.session_state.chat_history = []
+            save_store()
+            st.rerun()
+
+        st.caption(f"ประวัติทั้งหมด: {len(st.session_state.chat_history)} แชท")
+
         if not st.session_state.chat_history:
             st.caption("ยังไม่มีประวัติแชท")
         else:
             for i, snap in enumerate(st.session_state.chat_history[:12]):
-                col_t, col_b = st.columns([3.2, 1])
+                col_t, col_o, col_d = st.columns([2.8, 1, 1])
                 col_t.markdown(f"**{snap.get('title', 'แชทคณิตศาสตร์')}**")
-                col_t.caption(f"{snap.get('mode', '-') } · {snap.get('updated_at', '-')}")
-                if col_b.button("เปิด", key=f"open_hist_{snap.get('id', i)}"):
+                col_t.caption(
+                    f"{snap.get('mode', '-')} · {snap.get('updated_at', '-')} · {snap.get('message_count', len(snap.get('messages', [])))} ข้อความ"
+                )
+                if col_o.button("เปิด", key=f"open_hist_{snap.get('id', i)}"):
                     archive_current_chat(st.session_state.last_quick_mode)
                     load_chat_snapshot(snap)
+                    st.rerun()
+                if col_d.button("ลบ", key=f"del_hist_{snap.get('id', i)}"):
+                    st.session_state.chat_history = [
+                        c for c in st.session_state.chat_history if c.get("id") != snap.get("id")
+                    ]
+                    save_store()
                     st.rerun()
 
     st.divider()
@@ -862,7 +990,7 @@ for msg_idx, message in enumerate(st.session_state.messages):
         if "image_show" in message:
             st.image(message["image_show"], width=260)
 
-        content = message["content"]
+        content = strip_internal_tags(message["content"])
         is_quick_solve_msg = message.get("response_style") == "⚡️ เฉลยอย่างเดียว"
         decorate_final = not is_quick_solve_msg
 
@@ -887,6 +1015,7 @@ for msg_idx, message in enumerate(st.session_state.messages):
             message["role"] == "assistant"
             and "Socratic" in tutor_mode
             and msg_idx == len(st.session_state.messages) - 1
+            and st.session_state.socratic_can_continue
         ):
             if st.button(
                 "➡️  ไปต่อ — สอนขั้นถัดไป",
@@ -914,9 +1043,13 @@ if prompt:
 
     if "Socratic" in tutor_mode:
         if is_continue_request:
+            if not st.session_state.socratic_can_continue:
+                st.info("โจทย์นี้จบแล้วครับ ให้พิมพ์โจทย์ใหม่เพื่อเริ่มรอบใหม่")
+                st.stop()
             st.session_state.socratic_continue = True
-        elif typed_prompt:
+        else:
             st.session_state.socratic_continue = False
+            st.session_state.socratic_can_continue = True
 
     if not API_KEY.strip():
         st.error("⚠️ กรุณาใส่ Groq API Key ที่แถบด้านซ้ายก่อนครับ")
@@ -929,6 +1062,7 @@ if prompt:
     if uploaded_img:
         user_msg["image_show"] = uploaded_img
     st.session_state.messages.append(user_msg)
+    save_store()
 
     with st.chat_message("user"):
         if uploaded_img:
@@ -946,6 +1080,8 @@ if prompt:
         continue_step_instruction = (
             "\n7. เมื่อได้รับคำสั่ง 'ไปต่อ' ให้สอนเฉพาะขั้นถัดไป 1 ขั้นเท่านั้น"
             " และจบด้วยประโยค: 'พร้อมแล้วกดปุ่ม ➡️ ไปต่อ'"
+            "\n8. ถ้ายังไม่จบข้อ ให้ใส่ [[STEP_STATUS:CONTINUE]] ต่อท้ายคำตอบ"
+            "\n9. ถ้าจบข้อแล้วหรือให้คำตอบสุดท้าย ให้ใส่ [[STEP_STATUS:DONE]] ต่อท้ายคำตอบ"
         )
 
         stage_rule = continue_step_instruction if (is_continue_request or st.session_state.socratic_continue) else overview_only_instruction
@@ -959,7 +1095,8 @@ if prompt:
             "4. เฉลยเต็มได้เมื่อผู้เรียนพิมพ์ 'เฉลยเต็ม'\n"
             "5. เมื่อผู้เรียนพิมพ์ 'ไปต่อ' ให้สอนเพียง 1 ขั้นถัดไป แล้วถามกลับ\n"
             "6. ทุกสมการอยู่ใน LaTeX\n"
-            "7. ก่อนส่งคำตอบ ตรวจว่าวงเล็บ (), {}, และรูปแบบ LaTeX ปิดครบ ห้ามส่งสมการที่ขาดท้าย"
+            "7. ก่อนส่งคำตอบ ตรวจว่าวงเล็บ (), {}, และรูปแบบ LaTeX ปิดครบ ห้ามส่งสมการที่ขาดท้าย\n"
+            "8. ถ้าโจทย์เป็น Integration by Parts ต้องระบุให้สอดคล้องว่า ∫u dv = uv - ∫v du และ u,dv,du,v ต้องสัมพันธ์กัน"
             f"{stage_rule}"
         )
     elif "อธิบายละเอียด" in response_style:
@@ -1071,11 +1208,17 @@ if prompt:
                     )
 
             # Final clean render
-            final_answer = (
+            final_answer_raw = (
                 full_response.split("</think>")[-1]
                 if "</think>" in full_response
                 else full_response
             )
+            is_done_now = False
+            if "Socratic" in tutor_mode:
+                is_done_now = is_socratic_done(final_answer_raw, force_done=is_full_solution_request)
+                st.session_state.socratic_can_continue = not is_done_now
+
+            final_answer = strip_internal_tags(final_answer_raw)
             ans_ph.markdown(
                 beautify_answer_text(
                     final_answer,
@@ -1086,7 +1229,7 @@ if prompt:
 
             # ── Socratic continue button (after streaming)
             if "Socratic" in tutor_mode:
-                if st.button(
+                if st.session_state.socratic_can_continue and st.button(
                     "➡️  ไปต่อ — สอนขั้นถัดไป",
                     key="soc_cont_stream",
                     use_container_width=False,
@@ -1121,13 +1264,14 @@ if prompt:
             # Save response
             res_msg: dict = {
                 "role": "assistant",
-                "content": full_response,
+                "content": strip_internal_tags(full_response),
                 "response_style": response_style,
                 "tutor_mode": tutor_mode,
             }
             if plot_fig:
                 res_msg["plot"] = plot_fig
             st.session_state.messages.append(res_msg)
+            save_store()
 
         except Exception as e:
             st.error(f"🚨 เกิดข้อผิดพลาด: {e}")
