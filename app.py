@@ -682,30 +682,15 @@ for msg_idx, message in enumerate(st.session_state.messages):
         else:
             st.markdown(beautify_answer_text(str(content)), unsafe_allow_html=True)
 
-        if message["role"] == "assistant":
+        if (
+            message["role"] == "assistant"
+            and "Socratic" in tutor_mode
+            and msg_idx == len(st.session_state.messages) - 1
+        ):
             final_msg_text = str(content).split("</think>")[-1].strip()
-            follow_up_prompts = [
-                ("❓ ทำไมใช้สูตรนี้", "ช่วยอธิบายว่าทำไมถึงเลือกใช้สูตรในคำตอบนี้"),
-                ("🧠 ขอช้าลง", "ช่วยอธิบายใหม่แบบช้าลงและละเอียดขึ้น โดยเน้นขั้นที่สับสน"),
-                ("📝 ขอแบบฝึก", "ช่วยสร้างโจทย์คล้ายกัน 2 ข้อ และรอให้ฉันลองทำก่อนเฉลย"),
-                ("🔍 เฉพาะจุดที่งง", "ช่วยโฟกัสเฉพาะจุดที่คนมักผิดในวิธีทำข้อนี้")
-            ]
-            if "Socratic" in tutor_mode:
-                follow_up_prompts = [
-                    ("➡️ ไปต่อ", "ไปต่อขั้นถัดไปจากจุดล่าสุด 1 ขั้น โดยยังไม่เฉลยทั้งหมด"),
-                    ("❓ ทำไมใช้สูตรนี้", "ช่วยอธิบายว่าทำไมถึงเลือกใช้สูตรในคำตอบนี้"),
-                    ("🧠 ขอช้าลง", "ช่วยอธิบายใหม่แบบช้าลงและละเอียดขึ้น โดยเน้นขั้นที่สับสน"),
-                    ("📝 ขอแบบฝึก", "ช่วยสร้างโจทย์คล้ายกัน 2 ข้อ และรอให้ฉันลองทำก่อนเฉลย")
-                ]
-            cols = st.columns(4)
-            for i, (label, q_text) in enumerate(follow_up_prompts):
-                with cols[i]:
-                    if st.button(label, key=f"followup_{msg_idx}_{i}", use_container_width=True):
-                        if label == "➡️ ไปต่อ":
-                            st.session_state.pending_prompt = f"จากคำตอบล่าสุดนี้: {clean_snippet(final_msg_text, 220)}\n\nไปต่อ"
-                        else:
-                            st.session_state.pending_prompt = f"จากคำตอบนี้: {clean_snippet(final_msg_text, 220)}\n\n{q_text}"
-                        st.rerun()
+            if st.button("➡️ ไปต่อ", key=f"continue_only_{msg_idx}", use_container_width=True):
+                st.session_state.pending_prompt = f"จากคำตอบล่าสุดนี้: {clean_snippet(final_msg_text, 220)}\n\nไปต่อ"
+                st.rerun()
 
         if "plot" in message:
             st.pyplot(message["plot"])
@@ -859,6 +844,11 @@ if prompt:
             # Final display
             final_answer = full_response.split("</think>")[-1] if "</think>" in full_response else full_response
             answer_placeholder.markdown(beautify_answer_text(final_answer).strip(), unsafe_allow_html=True)
+
+            if "Socratic" in tutor_mode:
+                if st.button("➡️ ไปต่อ", key="continue_after_stream", use_container_width=True):
+                    st.session_state.pending_prompt = f"จากคำตอบล่าสุดนี้: {clean_snippet(final_answer, 220)}\n\nไปต่อ"
+                    st.rerun()
 
             # Auto-plot graph
             plot_fig = None
