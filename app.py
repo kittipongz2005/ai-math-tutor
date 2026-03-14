@@ -18,10 +18,8 @@ import numpy as np
 from groq import Groq
 from ui_assets import apply_ui_decorations
 from html_export import build_chat_export_html
+from worksheet_ui import render_worksheet_generator_ui
 from worksheet_tools import (
-    build_effective_weakness_counts,
-    build_weakness_worksheet_html,
-    build_weakness_worksheet_payload,
     resolve_pdf_font_name,
 )
 
@@ -106,6 +104,9 @@ for key, val in {
     "worksheet_export_name": "",
     "worksheet_export_ready": False,
     "manual_weakness_text": "",
+    "ocr_extracted_text": "",
+    "ocr_edit_text": "",
+    "ocr_image_signature": "",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -198,6 +199,12 @@ def encode_image(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.convert('RGB').save(buf, format="JPEG")
     return base64.b64encode(buf.getvalue()).decode()
+
+
+def build_image_signature(image_b64: str) -> str:
+    if not image_b64:
+        return ""
+    return f"{len(image_b64)}:{image_b64[:64]}"
 
 
 def count_tokens_approx(text) -> int:
@@ -861,8 +868,47 @@ with st.sidebar:
         if ftype.startswith("image/"):
             uploaded_img = Image.open(uploaded_file)
             base64_image = encode_image(uploaded_img)
+            current_image_sig = build_image_signature(base64_image)
+            if st.session_state.ocr_image_signature != current_image_sig:
+                st.session_state.ocr_image_signature = current_image_sig
+                st.session_state.ocr_extracted_text = ""
+                st.session_state.ocr_edit_text = ""
             st.image(uploaded_img, caption="📸 รูปที่อัปโหลด", use_container_width=True)
             st.success("✅ โหลดรูปสำเร็จ")
+
+            with st.expander("🧾 OCR จากรูป (แก้ไขได้)", expanded=False):
+                st.caption("สกัดข้อความ/สมการจากรูปเป็น LaTeX แล้วแก้ไขก่อนส่งเข้าโมเดลหลัก")
+                ocr_col1, ocr_col2 = st.columns(2)
+                if ocr_col1.button("สกัด OCR ตอนนี้", key="run_image_ocr_now", use_container_width=True):
+                    if not API_KEY.strip():
+                        st.warning("กรุณาใส่ Groq API Key ก่อน")
+                    else:
+                        with st.spinner("🔎 กำลังสกัดข้อความและสมการจากรูป..."):
+                            extracted_text, extracted_err = extract_math_latex_from_image(
+                                api_key=API_KEY.strip(),
+                                image_b64=base64_image,
+                                preferred_model=MODEL_NAME,
+                                prompt_hint="",
+                            )
+                        if extracted_text:
+                            st.session_state.ocr_extracted_text = extracted_text
+                            st.session_state.ocr_edit_text = extracted_text
+                            st.success("สกัด OCR สำเร็จ — แก้ไขข้อความได้ด้านล่าง")
+                        elif extracted_err:
+                            st.warning(extracted_err)
+
+                if ocr_col2.button("ล้าง OCR", key="clear_image_ocr", use_container_width=True):
+                    st.session_state.ocr_extracted_text = ""
+                    st.session_state.ocr_edit_text = ""
+
+                st.text_area(
+                    "OCR Text / LaTeX ที่จะส่งเข้าโมเดลหลัก",
+                    key="ocr_edit_text",
+                    height=170,
+                    placeholder="กด 'สกัด OCR ตอนนี้' เพื่อดึงข้อความจากรูป แล้วแก้ไขก่อนส่ง",
+                )
+                if st.session_state.ocr_extracted_text:
+                    st.caption("ระบบจะใช้ข้อความนี้อัตโนมัติเมื่อเลือกโมเดล non-vision")
 
             if st.button("🔍 วิเคราะห์สูตรจากรูปนี้ (แบบง่าย)", use_container_width=True):
                 if not API_KEY.strip():
@@ -1031,73 +1077,12 @@ with st.sidebar:
                     )
                     st.rerun()
 
-        st.markdown("### 🖨️ Smart Worksheet Generator")
-        st.text_area(
-            "พิมพ์หัวข้อที่อ่อนเอง (คั่นด้วย , หรือขึ้นบรรทัดใหม่)",
-            key="manual_weakness_text",
-            height=76,
-            placeholder="เช่น แคลคูลัส, ตรีโกณมิติ, เมทริกซ์",
+        render_worksheet_generator_ui(
+            api_key=API_KEY,
+            model_name=MODEL_NAME,
+            learner_level=learner_level,
+            language_pref=language_pref,
         )
-
-        effective_weakness_counts = build_effective_weakness_counts(
-            st.session_state.weakness_counts,
-            st.session_state.manual_weakness_text,
-        )
-
-        if not effective_weakness_counts:
-            st.caption("ยังไม่มีข้อมูลจุดอ่อน ให้พิมพ์หัวข้อที่อ่อนเองด้านบน หรือถามโจทย์ก่อนอย่างน้อย 1 ครั้ง")
-        else:
-            top_preview = sorted(effective_weakness_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-            st.caption("หัวข้อที่จะใช้สร้างใบงาน: " + ", ".join([f"{t}" for t, _ in top_preview]))
-
-        worksheet_q_count = st.slider(
-            "จำนวนข้อสำหรับใบงานทบทวน",
-            min_value=5,
-            max_value=10,
-            value=7,
-            step=1,
-            key="worksheet_q_count",
-        )
-
-        if st.button("สร้างแบบฝึกหัดทบทวนจุดอ่อน", use_container_width=True, key="gen_weakness_worksheet"):
-            if not API_KEY.strip():
-                st.warning("กรุณาใส่ Groq API Key ก่อนสร้างใบงาน")
-            else:
-                with st.spinner("กำลังสร้างใบงานจากหัวข้อที่พลาดบ่อย..."):
-                    worksheet_payload, ws_err = build_weakness_worksheet_payload(
-                        api_key=API_KEY.strip(),
-                        model_name=MODEL_NAME,
-                        weakness_counts=effective_weakness_counts,
-                        learner_level=learner_level,
-                        language_pref=language_pref,
-                        question_count=worksheet_q_count,
-                    )
-                    if ws_err:
-                        st.error(ws_err)
-                        st.session_state.worksheet_export_content = ""
-                        st.session_state.worksheet_export_name = ""
-                        st.session_state.worksheet_export_ready = False
-                    else:
-                        worksheet_html = build_weakness_worksheet_html(
-                            worksheet=worksheet_payload,
-                            weakness_counts=effective_weakness_counts,
-                        )
-                        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        st.session_state.worksheet_export_content = worksheet_html
-                        st.session_state.worksheet_export_name = f"weakness_worksheet_{stamp}.html"
-                        st.session_state.worksheet_export_ready = True
-                        st.success("สร้างใบงานสำเร็จ — ดาวน์โหลด HTML แล้วเปิดในเบราว์เซอร์เพื่อ Save as PDF")
-
-        if st.session_state.worksheet_export_ready and st.session_state.worksheet_export_content:
-            st.download_button(
-                "ดาวน์โหลดใบงาน HTML (Save as PDF)",
-                data=st.session_state.worksheet_export_content,
-                file_name=st.session_state.worksheet_export_name or "weakness_worksheet.html",
-                mime="text/html",
-                use_container_width=True,
-                key="download_weakness_worksheet_html",
-            )
-            st.caption("วิธีใช้งาน: เปิดไฟล์ HTML ใน Chrome/Edge → กด Ctrl+P → Save as PDF")
 
     if st.button("🗑️ ล้างการสนทนา", use_container_width=True):
         reset_current_chat()
@@ -1229,21 +1214,6 @@ if prompt:
         st.error("⚠️ กรุณาใส่ Groq API Key ที่แถบด้านซ้ายก่อนครับ")
         st.stop()
 
-    image_ocr_text = ""
-    if base64_image:
-        with st.spinner("🔎 กำลังอ่านโจทย์จากรูปภาพและแปลงเป็น LaTeX..."):
-            ocr_text, ocr_err = extract_math_latex_from_image(
-                api_key=API_KEY.strip(),
-                image_b64=base64_image,
-                preferred_model=MODEL_NAME,
-                prompt_hint=prompt,
-            )
-        if ocr_text:
-            image_ocr_text = ocr_text
-            st.info("✅ แปลงรูปเป็นข้อความ/LaTeX แล้ว และจะส่งต่อให้โมเดลคำนวณ")
-        elif ocr_err:
-            st.warning(f"OCR จากรูปไม่สำเร็จ ระบบจะใช้ข้อความที่ผู้ใช้พิมพ์ร่วมกับภาพตามที่โมเดลรองรับ: {ocr_err}")
-
     update_weakness(prompt)
 
     # Save & display user message
@@ -1341,14 +1311,10 @@ if prompt:
             content_text = f"[คำสั่งระบบ: {sys_prompt}]\n\n" + content_text
 
         if i == len(st.session_state.messages) - 1 and role == "user":
-            if image_ocr_text:
-                content_text += f"\n\n[ข้อความและสมการที่สกัดจากรูป (OCR LaTeX)]:\n{image_ocr_text[:6000]}"
             if file_content:
                 content_text += f"\n\n[ข้อมูลจากไฟล์]:\n{file_content[:4000]}"
             if base64_image:
-                if image_ocr_text:
-                    pass
-                elif is_vision:
+                if is_vision:
                     messages_for_ai.append({
                         "role": role,
                         "content": [
@@ -1358,7 +1324,37 @@ if prompt:
                     })
                     continue
                 else:
-                    content_text += "\n\n(ผู้ใช้แนบรูปมาแต่โมเดลนี้ไม่รองรับการดูรูป)"
+                    extracted_text = str(st.session_state.ocr_edit_text or "").strip()
+                    if not extracted_text:
+                        try:
+                            vision_client = Groq(api_key=API_KEY.strip())
+                            vision_response = vision_client.chat.completions.create(
+                                model="llama-3.2-90b-vision-preview",
+                                messages=[
+                                    {
+                                        "role": "system",
+                                        "content": "ดึงข้อความและสมการคณิตศาสตร์ทั้งหมดจากรูปภาพนี้ออกมาเป็นข้อความและรูปแบบ LaTeX ห้ามเฉลยโจทย์ ห้ามพิมพ์ข้อความสนทนาอื่นๆ",
+                                    },
+                                    {
+                                        "role": "user",
+                                        "content": [
+                                            {"type": "text", "text": "อ่านข้อความและสมการทั้งหมดจากรูปนี้เท่านั้น"},
+                                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
+                                        ],
+                                    },
+                                ],
+                                temperature=0,
+                                max_tokens=1500,
+                            )
+                            extracted_text = (vision_response.choices[0].message.content or "").strip()
+                            if extracted_text:
+                                st.session_state.ocr_extracted_text = extracted_text
+                                st.session_state.ocr_edit_text = extracted_text
+                        except Exception as vision_error:
+                            st.warning(f"ไม่สามารถสกัดข้อความจากรูปภาพได้ชั่วคราว: {vision_error}")
+
+                    if extracted_text:
+                        content_text += f"\n\n[ข้อความที่สกัดได้จากรูปภาพ]:\n{extracted_text[:6000]}"
 
         messages_for_ai.append({"role": role, "content": content_text})
 
