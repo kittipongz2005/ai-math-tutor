@@ -409,14 +409,17 @@ def extract_math_latex_from_image(
         return None, f"สร้าง Groq client ไม่สำเร็จ: {e}"
 
     deprecated_models = {
+        "llama-3.2-90b-vision-preview",
         "llama-3.2-11b-vision-preview",
     }
+
+    vision_model_default = "meta-llama/llama-4-scout-17b-16e-instruct"
 
     model_candidates = []
     if preferred_model and "vision" in preferred_model.lower() and preferred_model not in deprecated_models:
         model_candidates.append(preferred_model)
     model_candidates.extend([
-        "llama-3.2-90b-vision-preview",
+        vision_model_default,
     ])
 
     seen = set()
@@ -428,14 +431,12 @@ def extract_math_latex_from_image(
             unique_models.append(model_name)
             seen.add(model_name)
 
+    ocr_system_prompt = (
+        "ดึงข้อความและสมการคณิตศาสตร์ทั้งหมดจากรูปภาพนี้ออกมาเป็นข้อความและรูปแบบ LaTeX ห้ามเฉลยโจทย์ ห้ามพิมพ์ข้อความสนทนาอื่นๆ"
+    )
+
     ocr_prompt = (
-        "คุณคือ OCR คณิตศาสตร์สำหรับสกัดโจทย์จากภาพเท่านั้น\n"
-        "งานของคุณ: อ่านข้อความและสมการในรูป แล้วแปลงเป็นข้อความ/LaTeX โดยห้ามเฉลยโจทย์\n"
-        "ข้อกำหนด:\n"
-        "1) ห้ามคำนวณ ห้ามอธิบายวิธีทำ ห้ามเฉลย\n"
-        "2) รักษาโครงสร้างโจทย์เดิมให้มากที่สุด\n"
-        "3) สมการต้องอยู่ในรูป LaTeX\n"
-        "4) ถ้าอ่านไม่ชัดให้ใส่ [unclear]\n"
+        "อ่านข้อความและสมการจากรูป แล้วจัดรูปแบบผลลัพธ์ให้ชัดเจน\n"
         "รูปแบบผลลัพธ์:\n"
         "[OCR_TEXT]\n"
         "...\n\n"
@@ -452,6 +453,10 @@ def extract_math_latex_from_image(
             resp = client.chat.completions.create(
                 model=model_name,
                 messages=[
+                    {
+                        "role": "system",
+                        "content": ocr_system_prompt,
+                    },
                     {
                         "role": "user",
                         "content": [
@@ -1155,14 +1160,20 @@ if prompt:
                     })
                     continue
                 else:
-                    extracted_text, ocr_err = extract_math_latex_from_image(
-                        api_key=API_KEY.strip(),
-                        image_b64=base64_image,
-                        preferred_model=MODEL_NAME,
-                        prompt_hint=content_text,
-                    )
-                    if ocr_err:
-                        st.warning(ocr_err)
+                    extracted_text = ""
+                    try:
+                        extracted_text, ocr_err = extract_math_latex_from_image(
+                            api_key=API_KEY.strip(),
+                            image_b64=base64_image,
+                            preferred_model=MODEL_NAME,
+                            prompt_hint=content_text,
+                        )
+                        if ocr_err:
+                            st.error("สกัดข้อความจากรูปไม่สำเร็จ โปรดลองใหม่อีกครั้ง")
+                            extracted_text = ""
+                    except Exception:
+                        st.error("สกัดข้อความจากรูปไม่สำเร็จ โปรดลองใหม่อีกครั้ง")
+                        extracted_text = ""
 
                     if extracted_text:
                         content_text += f"\n\n[ข้อความที่สกัดได้จากรูปภาพ]:\n{extracted_text[:6000]}"
