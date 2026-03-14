@@ -104,9 +104,6 @@ for key, val in {
     "worksheet_export_name": "",
     "worksheet_export_ready": False,
     "manual_weakness_text": "",
-    "ocr_extracted_text": "",
-    "ocr_edit_text": "",
-    "ocr_image_signature": "",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -199,12 +196,6 @@ def encode_image(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.convert('RGB').save(buf, format="JPEG")
     return base64.b64encode(buf.getvalue()).decode()
-
-
-def build_image_signature(image_b64: str) -> str:
-    if not image_b64:
-        return ""
-    return f"{len(image_b64)}:{image_b64[:64]}"
 
 
 def count_tokens_approx(text) -> int:
@@ -868,102 +859,30 @@ with st.sidebar:
         if ftype.startswith("image/"):
             uploaded_img = Image.open(uploaded_file)
             base64_image = encode_image(uploaded_img)
-            current_image_sig = build_image_signature(base64_image)
-            if st.session_state.ocr_image_signature != current_image_sig:
-                st.session_state.ocr_image_signature = current_image_sig
-                st.session_state.ocr_extracted_text = ""
-                st.session_state.ocr_edit_text = ""
             st.image(uploaded_img, caption="📸 รูปที่อัปโหลด", use_container_width=True)
             st.success("✅ โหลดรูปสำเร็จ")
-
-            with st.expander("🧾 OCR จากรูป (แก้ไขได้)", expanded=False):
-                st.caption("สกัดข้อความ/สมการจากรูปเป็น LaTeX แล้วแก้ไขก่อนส่งเข้าโมเดลหลัก")
-                ocr_col1, ocr_col2 = st.columns(2)
-                if ocr_col1.button("สกัด OCR ตอนนี้", key="run_image_ocr_now", use_container_width=True):
-                    if not API_KEY.strip():
-                        st.warning("กรุณาใส่ Groq API Key ก่อน")
-                    else:
-                        with st.spinner("🔎 กำลังสกัดข้อความและสมการจากรูป..."):
-                            extracted_text, extracted_err = extract_math_latex_from_image(
-                                api_key=API_KEY.strip(),
-                                image_b64=base64_image,
-                                preferred_model=MODEL_NAME,
-                                prompt_hint="",
-                            )
-                        if extracted_text:
-                            st.session_state.ocr_extracted_text = extracted_text
-                            st.session_state.ocr_edit_text = extracted_text
-                            st.success("สกัด OCR สำเร็จ — แก้ไขข้อความได้ด้านล่าง")
-                        elif extracted_err:
-                            st.warning(extracted_err)
-
-                if ocr_col2.button("ล้าง OCR", key="clear_image_ocr", use_container_width=True):
-                    st.session_state.ocr_extracted_text = ""
-                    st.session_state.ocr_edit_text = ""
-
-                st.text_area(
-                    "OCR Text / LaTeX ที่จะส่งเข้าโมเดลหลัก",
-                    key="ocr_edit_text",
-                    height=170,
-                    placeholder="กด 'สกัด OCR ตอนนี้' เพื่อดึงข้อความจากรูป แล้วแก้ไขก่อนส่ง",
-                )
-                if st.session_state.ocr_extracted_text:
-                    st.caption("ระบบจะใช้ข้อความนี้อัตโนมัติเมื่อเลือกโมเดล non-vision")
 
             if st.button("🔍 วิเคราะห์สูตรจากรูปนี้ (แบบง่าย)", use_container_width=True):
                 if not API_KEY.strip():
                     st.warning("กรุณาใส่ Groq API Key ก่อน")
                 else:
-                    try:
-                        vision_prompt = (
-                            "อ่านข้อความ/สมการจากรูปนี้ แล้วตอบเป็นภาษาไทยสั้น ๆ ว่า:\n"
-                            "1) สูตรหรือขั้นตอนนี้คืออะไร\n"
-                            "2) มาจากหลักการไหน\n"
-                            "3) ใช้เมื่อไหร่\n"
-                            "4) ข้อผิดพลาดที่พบบ่อย 1 ข้อ"
+                    with st.spinner("🔎 กำลังอ่านข้อความ/สมการจากรูป..."):
+                        analysis_text, analysis_err = extract_math_latex_from_image(
+                            api_key=API_KEY.strip(),
+                            image_b64=base64_image,
+                            preferred_model=MODEL_NAME,
+                            prompt_hint="โฟกัสการอ่านให้ชัด แล้วส่งข้อความและ LaTeX ที่ถูกต้อง",
                         )
-                        client = Groq(api_key=API_KEY.strip())
 
-                        model_candidates = []
-                        if "vision" in MODEL_NAME.lower():
-                            model_candidates.append(MODEL_NAME)
-                        model_candidates.extend([
-                            "llama-3.2-11b-vision-preview",
-                            "llama-3.2-90b-vision-preview",
-                        ])
-
-                        analysis_text = ""
-                        for model_name in model_candidates:
-                            try:
-                                resp = client.chat.completions.create(
-                                    model=model_name,
-                                    messages=[
-                                        {
-                                            "role": "user",
-                                            "content": [
-                                                {"type": "text", "text": vision_prompt},
-                                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
-                                            ],
-                                        }
-                                    ],
-                                )
-                                analysis_text = (resp.choices[0].message.content or "").strip()
-                                if analysis_text:
-                                    break
-                            except Exception:
-                                continue
-
-                        if analysis_text:
-                            st.session_state.pending_prompt = (
-                                f"ฉันแนบรูปโจทย์นี้มา:\n{analysis_text}\n\n"
-                                "ช่วยอธิบายให้เข้าใจง่ายและเชื่อมกับวิธีทำในข้อสอบ"
-                            )
-                            save_store()
-                            st.rerun()
-                        else:
-                            st.error("ยังวิเคราะห์ภาพไม่ได้ ลองใหม่อีกครั้ง")
-                    except Exception as e:
-                        st.error(f"วิเคราะห์รูปไม่สำเร็จ: {e}")
+                    if analysis_text:
+                        st.session_state.pending_prompt = (
+                            f"ฉันแนบรูปโจทย์นี้มา:\n{analysis_text}\n\n"
+                            "ช่วยอธิบายให้เข้าใจง่ายและเชื่อมกับวิธีทำในข้อสอบ"
+                        )
+                        save_store()
+                        st.rerun()
+                    else:
+                        st.error(analysis_err or "ยังวิเคราะห์ภาพไม่ได้ ลองใหม่อีกครั้ง")
 
             cropper_fn = get_cropper_func()
             if cropper_fn is not None:
@@ -984,47 +903,24 @@ with st.sidebar:
                             if not API_KEY.strip():
                                 st.warning("กรุณาใส่ Groq API Key ก่อน")
                             else:
-                                try:
-                                    vision_prompt = (
-                                        "อ่านข้อความ/สมการจากภาพที่ครอป แล้วตอบสั้น ๆ เป็นภาษาไทยว่า:\n"
-                                        "1) นี่คือสูตรหรือขั้นตอนไหน\n"
-                                        "2) มาจากหลักการไหน\n"
-                                        "3) ต้องระวังอะไร"
+                                crop_b64 = encode_image(cropped_img)
+                                with st.spinner("🔎 กำลังอ่านข้อความ/สมการจากภาพที่ครอป..."):
+                                    analysis_text, analysis_err = extract_math_latex_from_image(
+                                        api_key=API_KEY.strip(),
+                                        image_b64=crop_b64,
+                                        preferred_model=MODEL_NAME,
+                                        prompt_hint="ภาพนี้เป็นส่วนที่ครอป ให้เน้นอ่านข้อความ/สมการตามที่เห็นเท่านั้น",
                                     )
-                                    crop_b64 = encode_image(cropped_img)
-                                    client = Groq(api_key=API_KEY.strip())
-                                    analysis_text = ""
-                                    for model_name in [MODEL_NAME, "llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]:
-                                        try:
-                                            resp = client.chat.completions.create(
-                                                model=model_name,
-                                                messages=[
-                                                    {
-                                                        "role": "user",
-                                                        "content": [
-                                                            {"type": "text", "text": vision_prompt},
-                                                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{crop_b64}"}},
-                                                        ],
-                                                    }
-                                                ],
-                                            )
-                                            analysis_text = (resp.choices[0].message.content or "").strip()
-                                            if analysis_text:
-                                                break
-                                        except Exception:
-                                            continue
 
-                                    if analysis_text:
-                                        st.session_state.pending_prompt = (
-                                            f"ฉันครอปส่วนนี้มา:\n{analysis_text}\n\n"
-                                            "ช่วยอธิบายเพิ่มว่ามาจากสูตรไหน และเชื่อมกับขั้นตอนในโจทย์ยังไง"
-                                        )
-                                        save_store()
-                                        st.rerun()
-                                    else:
-                                        st.error("ยังวิเคราะห์ภาพครอปไม่ได้ ลองครอปให้ชัดขึ้น")
-                                except Exception as e:
-                                    st.error(f"วิเคราะห์ภาพครอปไม่สำเร็จ: {e}")
+                                if analysis_text:
+                                    st.session_state.pending_prompt = (
+                                        f"ฉันครอปส่วนนี้มา:\n{analysis_text}\n\n"
+                                        "ช่วยอธิบายเพิ่มว่ามาจากสูตรไหน และเชื่อมกับขั้นตอนในโจทย์ยังไง"
+                                    )
+                                    save_store()
+                                    st.rerun()
+                                else:
+                                    st.error(analysis_err or "ยังวิเคราะห์ภาพครอปไม่ได้ ลองครอปให้ชัดขึ้น")
             else:
                 st.caption("หมายเหตุ: โหมดครอปขั้นสูงต้องใช้แพ็กเกจ streamlit-cropper")
         elif ftype == "application/pdf":
@@ -1324,34 +1220,14 @@ if prompt:
                     })
                     continue
                 else:
-                    extracted_text = str(st.session_state.ocr_edit_text or "").strip()
-                    if not extracted_text:
-                        try:
-                            vision_client = Groq(api_key=API_KEY.strip())
-                            vision_response = vision_client.chat.completions.create(
-                                model="llama-3.2-90b-vision-preview",
-                                messages=[
-                                    {
-                                        "role": "system",
-                                        "content": "ดึงข้อความและสมการคณิตศาสตร์ทั้งหมดจากรูปภาพนี้ออกมาเป็นข้อความและรูปแบบ LaTeX ห้ามเฉลยโจทย์ ห้ามพิมพ์ข้อความสนทนาอื่นๆ",
-                                    },
-                                    {
-                                        "role": "user",
-                                        "content": [
-                                            {"type": "text", "text": "อ่านข้อความและสมการทั้งหมดจากรูปนี้เท่านั้น"},
-                                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
-                                        ],
-                                    },
-                                ],
-                                temperature=0,
-                                max_tokens=1500,
-                            )
-                            extracted_text = (vision_response.choices[0].message.content or "").strip()
-                            if extracted_text:
-                                st.session_state.ocr_extracted_text = extracted_text
-                                st.session_state.ocr_edit_text = extracted_text
-                        except Exception as vision_error:
-                            st.warning(f"ไม่สามารถสกัดข้อความจากรูปภาพได้ชั่วคราว: {vision_error}")
+                    extracted_text, ocr_err = extract_math_latex_from_image(
+                        api_key=API_KEY.strip(),
+                        image_b64=base64_image,
+                        preferred_model=MODEL_NAME,
+                        prompt_hint=content_text,
+                    )
+                    if ocr_err:
+                        st.warning(ocr_err)
 
                     if extracted_text:
                         content_text += f"\n\n[ข้อความที่สกัดได้จากรูปภาพ]:\n{extracted_text[:6000]}"
