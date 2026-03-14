@@ -23,14 +23,6 @@ from worksheet_tools import (
     resolve_pdf_font_name,
 )
 
-
-def get_cropper_func():
-    try:
-        cropper_module = importlib.import_module("streamlit_cropper")
-        return getattr(cropper_module, "st_cropper", None)
-    except Exception:
-        return None
-
 SUPABASE_AVAILABLE = True
 
 STORE_PATH = Path(".math_tutor_store.json")
@@ -861,68 +853,6 @@ with st.sidebar:
             base64_image = encode_image(uploaded_img)
             st.image(uploaded_img, caption="📸 รูปที่อัปโหลด", use_container_width=True)
             st.success("✅ โหลดรูปสำเร็จ")
-
-            if st.button("🔍 วิเคราะห์สูตรจากรูปนี้ (แบบง่าย)", use_container_width=True):
-                if not API_KEY.strip():
-                    st.warning("กรุณาใส่ Groq API Key ก่อน")
-                else:
-                    with st.spinner("🔎 กำลังอ่านข้อความ/สมการจากรูป..."):
-                        analysis_text, analysis_err = extract_math_latex_from_image(
-                            api_key=API_KEY.strip(),
-                            image_b64=base64_image,
-                            preferred_model=MODEL_NAME,
-                            prompt_hint="โฟกัสการอ่านให้ชัด แล้วส่งข้อความและ LaTeX ที่ถูกต้อง",
-                        )
-
-                    if analysis_text:
-                        st.session_state.pending_prompt = (
-                            f"ฉันแนบรูปโจทย์นี้มา:\n{analysis_text}\n\n"
-                            "ช่วยอธิบายให้เข้าใจง่ายและเชื่อมกับวิธีทำในข้อสอบ"
-                        )
-                        save_store()
-                        st.rerun()
-                    else:
-                        st.error(analysis_err or "ยังวิเคราะห์ภาพไม่ได้ ลองใหม่อีกครั้ง")
-
-            cropper_fn = get_cropper_func()
-            if cropper_fn is not None:
-                with st.expander("โหมดขั้นสูง: ครอปเฉพาะส่วน", expanded=False):
-                    st.caption("ลากกรอบเฉพาะสูตรที่สงสัย แล้วกดปุ่มวิเคราะห์")
-                    cropped_img = cropper_fn(
-                        uploaded_img,
-                        realtime_update=True,
-                        return_type="image",
-                        box_color="#3b82f6",
-                        aspect_ratio=None,
-                        key="formula_cropper",
-                    )
-                    if cropped_img is not None:
-                        st.image(cropped_img, caption="🧩 ส่วนที่ครอป", use_container_width=True)
-
-                        if st.button("🔍 วิเคราะห์จากส่วนที่ครอป", use_container_width=True):
-                            if not API_KEY.strip():
-                                st.warning("กรุณาใส่ Groq API Key ก่อน")
-                            else:
-                                crop_b64 = encode_image(cropped_img)
-                                with st.spinner("🔎 กำลังอ่านข้อความ/สมการจากภาพที่ครอป..."):
-                                    analysis_text, analysis_err = extract_math_latex_from_image(
-                                        api_key=API_KEY.strip(),
-                                        image_b64=crop_b64,
-                                        preferred_model=MODEL_NAME,
-                                        prompt_hint="ภาพนี้เป็นส่วนที่ครอป ให้เน้นอ่านข้อความ/สมการตามที่เห็นเท่านั้น",
-                                    )
-
-                                if analysis_text:
-                                    st.session_state.pending_prompt = (
-                                        f"ฉันครอปส่วนนี้มา:\n{analysis_text}\n\n"
-                                        "ช่วยอธิบายเพิ่มว่ามาจากสูตรไหน และเชื่อมกับขั้นตอนในโจทย์ยังไง"
-                                    )
-                                    save_store()
-                                    st.rerun()
-                                else:
-                                    st.error(analysis_err or "ยังวิเคราะห์ภาพครอปไม่ได้ ลองครอปให้ชัดขึ้น")
-            else:
-                st.caption("หมายเหตุ: โหมดครอปขั้นสูงต้องใช้แพ็กเกจ streamlit-cropper")
         elif ftype == "application/pdf":
             try:
                 reader = PyPDF2.PdfReader(uploaded_file)
