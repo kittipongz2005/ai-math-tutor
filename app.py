@@ -294,6 +294,19 @@ def build_profile_prompt(level, speed, lang, mode) -> str:
     )
 
 
+def build_empathy_prompt(enabled: bool) -> str:
+    if not enabled:
+        return ""
+    return (
+        "\n\nกติกาด้านจิตวิทยาการสอน (Empathy & Persona):\n"
+        "- ประเมินระดับความหงุดหงิดของผู้เรียนจากบริบทแชทล่าสุดทุกครั้ง\n"
+        "- ถ้าผู้เรียนตอบผิดซ้ำ/หลงทางเกิน 2 รอบ ให้ปรับน้ำเสียงเป็นกำลังใจ อ่อนโยน และชี้จุดผิดแบบเฉพาะเจาะจง\n"
+        "- หลีกเลี่ยงคำพูดทื่อ ๆ หรือทำให้ผู้เรียนรู้สึกถูกตำหนิ\n"
+        "- ตัวอย่างโทนปกติ: 'ถูกต้องครับ ไปขั้นต่อไปกันเลย'\n"
+        "- ตัวอย่างโทนเมื่อผู้เรียนตอบผิดซ้ำ: 'เกือบเป๊ะแล้วครับ! มาถูกทางแล้วตรงเครื่องหมายบวก แต่ลองเช็คตัวเลขหน้า $x$ อีกนิดนึงนะครับ สู้ๆ ✌️'"
+    )
+
+
 def build_chat_export_text(messages: list) -> str:
     lines = []
     for msg in messages:
@@ -392,6 +405,79 @@ def run_python_code_capture(code: str) -> tuple[bool, str]:
         return True, "(รันโค้ดสำเร็จ แต่ไม่มี output; แนะนำให้ print(result))"
     except Exception as e:
         return False, str(e)
+
+
+def extract_math_latex_from_image(
+    api_key: str,
+    image_b64: str,
+    preferred_model: str = "",
+    prompt_hint: str = "",
+) -> tuple[str | None, str | None]:
+    try:
+        client = Groq(api_key=api_key)
+    except Exception as e:
+        return None, f"สร้าง Groq client ไม่สำเร็จ: {e}"
+
+    model_candidates = []
+    if preferred_model and "vision" in preferred_model.lower():
+        model_candidates.append(preferred_model)
+    model_candidates.extend([
+        "llama-3.2-90b-vision-preview",
+        "llama-3.2-11b-vision-preview",
+    ])
+
+    seen = set()
+    unique_models = []
+    for model_name in model_candidates:
+        if model_name not in seen:
+            unique_models.append(model_name)
+            seen.add(model_name)
+
+    ocr_prompt = (
+        "คุณคือ OCR คณิตศาสตร์สำหรับสกัดโจทย์จากภาพเท่านั้น\n"
+        "งานของคุณ: อ่านข้อความและสมการในรูป แล้วแปลงเป็นข้อความ/LaTeX โดยห้ามเฉลยโจทย์\n"
+        "ข้อกำหนด:\n"
+        "1) ห้ามคำนวณ ห้ามอธิบายวิธีทำ ห้ามเฉลย\n"
+        "2) รักษาโครงสร้างโจทย์เดิมให้มากที่สุด\n"
+        "3) สมการต้องอยู่ในรูป LaTeX\n"
+        "4) ถ้าอ่านไม่ชัดให้ใส่ [unclear]\n"
+        "รูปแบบผลลัพธ์:\n"
+        "[OCR_TEXT]\n"
+        "...\n\n"
+        "[OCR_LATEX]\n"
+        "..."
+    )
+
+    if prompt_hint.strip():
+        ocr_prompt += f"\n\nบริบทจากผู้ใช้ (ช่วยแยกแยะตัวอักษร): {prompt_hint.strip()[:500]}"
+
+    last_error = ""
+    for model_name in unique_models:
+        try:
+            resp = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": ocr_prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                        ],
+                    }
+                ],
+                temperature=0,
+                max_tokens=1200,
+            )
+            content = (resp.choices[0].message.content or "").strip()
+            if content:
+                return content, None
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    if not last_error:
+        last_error = "Vision OCR ไม่ส่งข้อความกลับ"
+    return None, f"สกัดข้อความจากรูปไม่สำเร็จ: {last_error}"
 
 
 def now_iso() -> str:
@@ -1143,6 +1229,21 @@ if prompt:
         st.error("⚠️ กรุณาใส่ Groq API Key ที่แถบด้านซ้ายก่อนครับ")
         st.stop()
 
+    image_ocr_text = ""
+    if base64_image:
+        with st.spinner("🔎 กำลังอ่านโจทย์จากรูปภาพและแปลงเป็น LaTeX..."):
+            ocr_text, ocr_err = extract_math_latex_from_image(
+                api_key=API_KEY.strip(),
+                image_b64=base64_image,
+                preferred_model=MODEL_NAME,
+                prompt_hint=prompt,
+            )
+        if ocr_text:
+            image_ocr_text = ocr_text
+            st.info("✅ แปลงรูปเป็นข้อความ/LaTeX แล้ว และจะส่งต่อให้โมเดลคำนวณ")
+        elif ocr_err:
+            st.warning(f"OCR จากรูปไม่สำเร็จ ระบบจะใช้ข้อความที่ผู้ใช้พิมพ์ร่วมกับภาพตามที่โมเดลรองรับ: {ocr_err}")
+
     update_weakness(prompt)
 
     # Save & display user message
@@ -1214,6 +1315,7 @@ if prompt:
         should_force_overview = False
 
     profile   = build_profile_prompt(learner_level, explain_speed, language_pref, tutor_mode)
+    empathy_prompt = build_empathy_prompt(response_style != "⚡️ เฉลยอย่างเดียว")
     calc_instruction = ""
     if st.session_state.enable_python_calc:
         calc_instruction = (
@@ -1221,7 +1323,7 @@ if prompt:
             "- ถ้าต้องคำนวณตัวเลขที่ซับซ้อน ให้แนบโค้ด ```python``` ที่รันได้\n"
             "- ให้กำหนด result และ print(result)"
         )
-    sys_prompt = f"{base_sys}\n\n{profile}{calc_instruction}"
+    sys_prompt = f"{base_sys}\n\n{profile}{empathy_prompt}{calc_instruction}"
 
     is_deepseek = "deepseek" in MODEL_NAME.lower()
     is_vision   = "vision"   in MODEL_NAME.lower()
@@ -1239,10 +1341,14 @@ if prompt:
             content_text = f"[คำสั่งระบบ: {sys_prompt}]\n\n" + content_text
 
         if i == len(st.session_state.messages) - 1 and role == "user":
+            if image_ocr_text:
+                content_text += f"\n\n[ข้อความและสมการที่สกัดจากรูป (OCR LaTeX)]:\n{image_ocr_text[:6000]}"
             if file_content:
                 content_text += f"\n\n[ข้อมูลจากไฟล์]:\n{file_content[:4000]}"
             if base64_image:
-                if is_vision:
+                if image_ocr_text:
+                    pass
+                elif is_vision:
                     messages_for_ai.append({
                         "role": role,
                         "content": [
