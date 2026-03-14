@@ -408,17 +408,22 @@ def extract_math_latex_from_image(
     except Exception as e:
         return None, f"สร้าง Groq client ไม่สำเร็จ: {e}"
 
+    deprecated_models = {
+        "llama-3.2-11b-vision-preview",
+    }
+
     model_candidates = []
-    if preferred_model and "vision" in preferred_model.lower():
+    if preferred_model and "vision" in preferred_model.lower() and preferred_model not in deprecated_models:
         model_candidates.append(preferred_model)
     model_candidates.extend([
         "llama-3.2-90b-vision-preview",
-        "llama-3.2-11b-vision-preview",
     ])
 
     seen = set()
     unique_models = []
     for model_name in model_candidates:
+        if model_name in deprecated_models:
+            continue
         if model_name not in seen:
             unique_models.append(model_name)
             seen.add(model_name)
