@@ -96,6 +96,8 @@ for key, val in {
     "worksheet_export_name": "",
     "worksheet_export_ready": False,
     "manual_weakness_text": "",
+    "supabase_last_error": "",
+    "supabase_bootstrap_done": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -501,6 +503,7 @@ def sanitize_messages_for_storage(messages: list) -> list:
 
 
 def save_store():
+    st.session_state.supabase_last_error = ""
     payload = {
         "chat_history": st.session_state.chat_history,
         "current_chat": {
@@ -528,8 +531,8 @@ def save_store():
                     on_conflict="user_id",
                 ).execute()
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            st.session_state.supabase_last_error = str(e)
 
     try:
         STORE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -550,7 +553,8 @@ def load_store_once():
                 result = client.table(SUPABASE_TABLE).select("payload").eq("user_id", SUPABASE_USER_ID).limit(1).execute()
                 if result and getattr(result, "data", None):
                     payload = result.data[0].get("payload")
-        except Exception:
+        except Exception as e:
+            st.session_state.supabase_last_error = str(e)
             payload = None
 
     if payload is None:
@@ -662,6 +666,9 @@ def load_chat_snapshot(snapshot: dict):
 
 
 load_store_once()
+if supabase_ready() and not st.session_state.supabase_bootstrap_done:
+    save_store()
+    st.session_state.supabase_bootstrap_done = True
 
 # ─────────────────────────────────────────────
 #  Handle selection query param
@@ -925,6 +932,12 @@ with st.sidebar:
         st.rerun()
 
     st.caption("🔒 API Key ไม่ถูกบันทึก")
+    if supabase_ready():
+        st.caption(f"☁️ Storage: Supabase ({SUPABASE_TABLE})")
+    else:
+        st.caption("💾 Storage: Local file (Supabase not configured)")
+    if st.session_state.supabase_last_error:
+        st.caption("⚠️ Supabase error: " + st.session_state.supabase_last_error[:160])
 
 # ─────────────────────────────────────────────
 #  Header
