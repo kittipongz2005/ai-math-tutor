@@ -25,7 +25,7 @@ from worksheet_tools import (
 
 SUPABASE_AVAILABLE = True
 
-STORE_PATH = Path(".math_tutor_store.json")
+STORE_PATH = Path(".math_tutor3.json")
 
 
 def get_secret(name: str, default: str = "") -> str:
@@ -38,7 +38,7 @@ def get_secret(name: str, default: str = "") -> str:
 
 SUPABASE_URL = get_secret("SUPABASE_URL", "")
 SUPABASE_KEY = get_secret("SUPABASE_KEY", "")
-SUPABASE_TABLE = get_secret("SUPABASE_TABLE", "math_tutor_store")
+SUPABASE_TABLE = get_secret("SUPABASE_TABLE", "math_tutor3")
 SUPABASE_USER_ID = get_secret("SUPABASE_USER_ID", "default_user")
 
 
