@@ -246,6 +246,24 @@ def is_socratic_done(text: str, force_done: bool = False) -> bool:
     return any(marker in lowered for marker in done_markers)
 
 
+def normalize_socratic_answer(raw_text: str, force_done: bool = False) -> tuple[str, bool]:
+    raw = str(raw_text)
+    done = is_socratic_done(raw, force_done=force_done)
+    normalized = raw
+
+    if done:
+        normalized = re.sub(r'\[\[STEP_STATUS:CONTINUE\]\]', '', normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r'\n?\s*พร้อมแล้วกดปุ่ม\s*➡️\s*ไปต่อ\s*', '\n', normalized)
+        if not re.search(r'\[\[STEP_STATUS:DONE\]\]', normalized, flags=re.IGNORECASE):
+            normalized = normalized.rstrip() + "\n[[STEP_STATUS:DONE]]"
+    else:
+        has_any_tag = bool(re.search(r'\[\[STEP_STATUS:(DONE|CONTINUE)\]\]', normalized, flags=re.IGNORECASE))
+        if not has_any_tag:
+            normalized = normalized.rstrip() + "\n[[STEP_STATUS:CONTINUE]]"
+
+    return normalized.strip(), done
+
+
 def violates_socratic_overview(text: str) -> bool:
     raw = str(text)
     lowered = raw.lower()
@@ -1308,7 +1326,10 @@ if prompt:
 
             is_done_now = False
             if "Socratic" in tutor_mode:
-                is_done_now = is_socratic_done(final_answer_raw, force_done=is_full_solution_request)
+                final_answer_raw, is_done_now = normalize_socratic_answer(
+                    final_answer_raw,
+                    force_done=is_full_solution_request,
+                )
                 st.session_state.socratic_can_continue = not is_done_now
                 if is_done_now:
                     st.session_state.socratic_step_index = 0
