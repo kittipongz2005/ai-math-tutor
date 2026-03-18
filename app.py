@@ -81,6 +81,7 @@ for key, val in {
     "weakness_counts": {},
     "socratic_continue": False,
     "socratic_can_continue": False,
+    "socratic_step_index": 0,
     "chat_history": [],
     "quick_mode": "ติวละเอียด",
     "last_quick_mode": "ติวละเอียด",
@@ -274,6 +275,29 @@ def build_socratic_overview_fallback() -> str:
         "2. จัดรูปสมการให้พร้อมแทนสูตร\n"
         "3. ทำทีละขั้นจนได้รูปใกล้คำตอบ\n"
         "4. ตรวจความถูกต้องของรูปสุดท้าย\n\n"
+        "พร้อมแล้วกดปุ่ม ➡️ ไปต่อ\n"
+        "[[STEP_STATUS:CONTINUE]]"
+    )
+
+
+def violates_socratic_stepwise(text: str) -> bool:
+    raw = str(text)
+    patterns = [
+        r'คำตอบสุดท้าย',
+        r'\\boxed',
+        r'final answer',
+        r'\[\[STEP_STATUS:DONE\]\]',
+    ]
+    return any(re.search(p, raw, flags=re.IGNORECASE) for p in patterns)
+
+
+def build_socratic_step_fallback(step_index: int) -> str:
+    safe_step = max(1, int(step_index))
+    return (
+        f"ขั้นที่ {safe_step}: จัดรูปโจทย์ให้พร้อมทำขั้นถัดไปก่อน (ยังไม่สรุปคำตอบสุดท้าย)\n"
+        "- เขียนตัวแปร/นิยามที่ต้องใช้ให้ครบ\n"
+        "- ทำสมการหรือแทนค่าสั้น ๆ เฉพาะขั้นนี้\n"
+        "- ตรวจเครื่องหมายและวงเล็บให้ถูกต้อง\n\n"
         "พร้อมแล้วกดปุ่ม ➡️ ไปต่อ\n"
         "[[STEP_STATUS:CONTINUE]]"
     )
@@ -596,6 +620,7 @@ def reset_current_chat():
     st.session_state.weakness_counts = {}
     st.session_state.socratic_continue = False
     st.session_state.socratic_can_continue = False
+    st.session_state.socratic_step_index = 0
     st.session_state.current_chat_id = ""
     st.session_state.current_chat_dirty = False
     st.session_state.worksheet_export_content = ""
@@ -656,6 +681,7 @@ def load_chat_snapshot(snapshot: dict):
     st.session_state.pending_prompt = ""
     st.session_state.socratic_continue = False
     st.session_state.socratic_can_continue = False
+    st.session_state.socratic_step_index = 0
     st.session_state.current_chat_id = str(snapshot.get("id", ""))
     st.session_state.current_chat_dirty = False
     mode_from_snapshot = snapshot.get("mode", "ติวละเอียด")
@@ -1055,9 +1081,14 @@ if prompt:
                 st.info("โจทย์นี้จบแล้วครับ ให้พิมพ์โจทย์ใหม่เพื่อเริ่มรอบใหม่")
                 st.stop()
             st.session_state.socratic_continue = True
+            st.session_state.socratic_step_index = max(1, int(st.session_state.socratic_step_index)) + 1
+        elif is_full_solution_request:
+            st.session_state.socratic_continue = False
         else:
             st.session_state.socratic_continue = False
             st.session_state.socratic_can_continue = True
+            if int(st.session_state.socratic_step_index) <= 0:
+                st.session_state.socratic_step_index = 1
 
     if not API_KEY.strip():
         st.error("⚠️ กรุณาใส่ Groq API Key ที่แถบด้านซ้ายก่อนครับ")
@@ -1080,24 +1111,33 @@ if prompt:
 
     # ── Build System Prompt
     if "Socratic" in tutor_mode:
-        overview_only_instruction = (
-            "\n7. ถ้ายังไม่ใช่คำสั่ง 'ไปต่อ' หรือ 'เฉลยเต็ม' ให้ตอบแบบภาพรวมเท่านั้น:"
-            " บอกจำนวนขั้นตอนและสิ่งที่จะทำในแต่ละขั้นแบบสั้น ๆ ห้ามคำนวณละเอียด"
-            " และห้ามเฉลยผลลัพธ์สุดท้าย"
-            "\n8. ห้ามแสดงคำตอบสุดท้าย ห้ามใช้ \\boxed{...} และห้ามสรุปเป็น = ... + C ในรอบนี้"
-            "\n9. ตอนท้ายให้ปิดด้วยประโยค: 'พร้อมแล้วกดปุ่ม ➡️ ไปต่อ'"
-            " และใส่ [[STEP_STATUS:CONTINUE]]"
+        current_step = max(1, int(st.session_state.socratic_step_index or 1))
+        first_or_check_instruction = (
+            f"\n7. ตอนนี้อยู่ที่ขั้นที่ {current_step}: ให้สอนและคำนวณเฉพาะขั้นนี้เท่านั้น (ห้ามข้ามไปหลายขั้น)"
+            "\n8. ถ้าข้อความล่าสุดเป็นคำตอบของผู้เรียน ให้ตรวจและแก้เฉพาะจุดที่ผิดในขั้นนี้ก่อน"
+            "\n9. ห้ามแสดงคำตอบสุดท้าย ห้ามใช้ \\boxed{...} และห้ามสรุปเป็น = ... + C"
+            "\n10. ปิดท้ายด้วยประโยค: 'พร้อมแล้วกดปุ่ม ➡️ ไปต่อ' และใส่ [[STEP_STATUS:CONTINUE]]"
         )
         continue_step_instruction = (
-            "\n7. เมื่อได้รับคำสั่ง 'ไปต่อ' ให้สอนเฉพาะขั้นถัดไป 1 ขั้นเท่านั้น"
-            " และจบด้วยประโยค: 'พร้อมแล้วกดปุ่ม ➡️ ไปต่อ'"
-            "\n8. ถ้ายังไม่จบข้อ ให้ใส่ [[STEP_STATUS:CONTINUE]] ต่อท้ายคำตอบ"
-            "\n9. ถ้าจบข้อแล้วหรือให้คำตอบสุดท้าย ให้ใส่ [[STEP_STATUS:DONE]] ต่อท้ายคำตอบ"
+            f"\n7. ผู้เรียนกด 'ไปต่อ' แล้ว ตอนนี้คือขั้นที่ {current_step}: ให้สอนเฉพาะขั้นนี้ 1 ขั้นเท่านั้น"
+            "\n8. ใส่หัวข้อบรรทัดแรกว่า 'ขั้นที่ n:' และแสดงสมการเท่าที่จำเป็นของขั้นนี้"
+            "\n9. ถ้ายังไม่จบข้อ ให้ปิดท้ายด้วย 'พร้อมแล้วกดปุ่ม ➡️ ไปต่อ' และใส่ [[STEP_STATUS:CONTINUE]]"
+            "\n10. ถ้าจบข้อแล้วหรือให้คำตอบสุดท้าย ให้ใส่ [[STEP_STATUS:DONE]] ต่อท้ายคำตอบ"
+        )
+        full_solution_instruction = (
+            "\n7. ผู้เรียนขอ 'เฉลยเต็ม' แล้ว: ให้เฉลยครบทุกขั้นจนจบได้"
+            "\n8. ปิดท้ายด้วยคำตอบสุดท้ายให้ชัดเจน และใส่ [[STEP_STATUS:DONE]]"
         )
 
-        stage_rule = continue_step_instruction if (is_continue_request or st.session_state.socratic_continue) else overview_only_instruction
-        should_force_overview = not is_continue_request and not is_full_solution_request and not st.session_state.socratic_continue
+        if is_full_solution_request:
+            stage_rule = full_solution_instruction
+        elif is_continue_request or st.session_state.socratic_continue:
+            stage_rule = continue_step_instruction
+        else:
+            stage_rule = first_or_check_instruction
 
+        should_guard_stepwise = not is_full_solution_request
+        
         base_sys = (
             "คุณคือติวเตอร์คณิตศาสตร์ส่วนตัว (โหมดฝึกทีละขั้น)\n"
             "กฎเหล็ก:\n"
@@ -1131,7 +1171,7 @@ if prompt:
             "4. บรรทัดล่างสุด: **คำตอบสุดท้าย:** ตามด้วยสมการ\n"
             "5. ห้ามส่งสมการที่ไม่จบหรือวงเล็บไม่ครบ"
         )
-        should_force_overview = False
+        should_guard_stepwise = False
 
     profile   = build_profile_prompt(learner_level, explain_speed, language_pref, tutor_mode)
     empathy_prompt = build_empathy_prompt(response_style != "⚡️ เฉลยอย่างเดียว")
@@ -1253,13 +1293,17 @@ if prompt:
                 else full_response
             )
 
-            if "Socratic" in tutor_mode and should_force_overview and violates_socratic_overview(final_answer_raw):
-                final_answer_raw = build_socratic_overview_fallback()
+            if "Socratic" in tutor_mode and should_guard_stepwise and violates_socratic_stepwise(final_answer_raw):
+                final_answer_raw = build_socratic_step_fallback(st.session_state.socratic_step_index)
 
             is_done_now = False
             if "Socratic" in tutor_mode:
                 is_done_now = is_socratic_done(final_answer_raw, force_done=is_full_solution_request)
                 st.session_state.socratic_can_continue = not is_done_now
+                if is_done_now:
+                    st.session_state.socratic_step_index = 0
+                elif st.session_state.socratic_step_index <= 0:
+                    st.session_state.socratic_step_index = 1
 
             final_answer = strip_internal_tags(final_answer_raw)
             ans_ph.markdown(
