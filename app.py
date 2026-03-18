@@ -785,6 +785,7 @@ with st.sidebar:
             learner_level = st.selectbox(
                 "ระดับผู้เรียน",
                 ["ม.ต้น", "ม.ปลาย", "มหาวิทยาลัยปีต้น", "มหาวิทยาลัยปีสูง"],
+                index=2,
             )
             explain_speed = st.selectbox(
                 "ความเร็วอธิบาย",
